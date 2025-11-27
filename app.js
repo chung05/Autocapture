@@ -2,9 +2,18 @@
  * 名片掃描應用程式的主邏輯 (app.js) - 最終穩定版
  * 採用 Module.onRuntimeInitialized 確保 OpenCV 核心載入完成，並強化相機啟動流程。
  *
- * 修正：將相機啟動邏輯移至按鈕點擊事件 (startButton)。
+ * 修正：將相機啟動邏輯移至按鈕點擊事件 (startButton)，並修正 Module 定義順序。
  */
+
+// 宣告全域變數 (在 Module 定義前宣告，但不賦值給 cv 相關物件)
+let cap = null;
+let src = null; // 原始影像 Mat
+let dst = null; // 處理結果 Mat
+let streaming = false;
+let greenColor; // 確保不在頂層初始化 cv 相關物件
+
 // ** 核心修正：定義全域 Module 物件，以避免 ReferenceError **
+// 此物件必須在 app.js 檔案中盡可能早地被定義。
 var Module = {
     // 1. *** 核心修正: 使用 OpenCV 標準的初始化回呼函式 ***
     // 當 WebAssembly runtime 準備就緒後，會自動呼叫此函式
@@ -24,15 +33,11 @@ var Module = {
     }
 };
 
+// 取得 DOM 元素參照
 const video = document.getElementById('video');
 const canvasOutput = document.getElementById('canvasOutput');
 const statusDiv = document.getElementById('status');
-const startButton = document.getElementById('startButton'); // <-- 新增按鈕的參照
-let cap = null;
-let src = null; // 原始影像 Mat
-let dst = null; // 處理結果 Mat
-let streaming = false;
-let greenColor; // 確保不在頂層初始化 cv 相關物件
+const startButton = document.getElementById('startButton'); 
 
 // ** 新增 DOM 檢查和初始狀態設定 **
 if (startButton) {
