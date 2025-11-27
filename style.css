@@ -37,6 +37,11 @@ body {
     display: none; 
 }
 
+/* 隱藏緩衝區 Canvas */
+#canvasBuffer {
+    display: none;
+}
+
 #canvasOutput {
     /* 讓 canvas 放大顯示，佔滿畫面寬度，並維持比例 */
     width: 90vw; 
