@@ -1,10 +1,13 @@
 /**
  * 名片掃描應用程式的主邏輯 (app.js) - 最終穩定版
  * 採用 Module.onRuntimeInitialized 確保 OpenCV 核心載入完成，並強化相機啟動流程。
+ *
+ * 修正：將相機啟動邏輯移至按鈕點擊事件 (startButton)。
  */
 const video = document.getElementById('video');
 const canvasOutput = document.getElementById('canvasOutput');
 const statusDiv = document.getElementById('status');
+const startButton = document.getElementById('startButton'); // <-- 新增按鈕的參照
 let cap = null;
 let src = null; // 原始影像 Mat
 let dst = null; // 處理結果 Mat
@@ -17,13 +20,22 @@ Module.onRuntimeInitialized = function() {
     // 關鍵修正點：在這裡初始化所有依賴 cv 物件的變數，確保 cv 已載入
     greenColor = new cv.Scalar(0, 255, 0, 255); // 綠色 (用於繪製邊框)
     
-    statusDiv.innerHTML = 'OpenCV 載入完成，正在啟動相機...';
-    console.log("DIAG: Module.onRuntimeInitialized 成功，開始啟動相機。");
-    startCamera();
+    statusDiv.innerHTML = 'OpenCV 載入完成。請點擊「開始」按鈕。';
+    console.log("DIAG: Module.onRuntimeInitialized 成功，OpenCV 核心已準備就緒。");
+    
+    // 將相機啟動邏輯綁定到按鈕點擊事件
+    if (startButton) {
+        startButton.addEventListener('click', startCamera);
+        startButton.disabled = false; // 載入完成後啟用按鈕
+        startButton.innerHTML = '點擊開始';
+    }
 };
 
 // 2. 啟動相機並設定串流
 function startCamera() {
+    startButton.disabled = true; // 避免重複點擊
+    statusDiv.innerHTML = '正在請求相機權限...';
+    
     // 請求後置鏡頭，避免使用進階限制來確保 iOS 相容性
     navigator.mediaDevices.getUserMedia({
         video: {
@@ -43,8 +55,10 @@ function startCamera() {
             console.log(`DIAG: loadeddata 事件觸發。串流解析度: ${video.videoWidth}x${video.videoHeight}`);
 
             if (video.videoWidth === 0 || video.videoHeight === 0) {
-                 statusDiv.innerHTML = '致命錯誤：串流尺寸為 0x0。請重新整理或檢查相機資源是否被佔用。';
+                 const errMsg = '致命錯誤：串流尺寸為 0x0。請重新整理或檢查相機資源是否被佔用。';
+                 statusDiv.innerHTML = errMsg;
                  console.error("DIAG ERROR: Video stream reports 0x0 dimensions after loadeddata.");
+                 startButton.disabled = false; // 發生錯誤時重新啟用按鈕
                  return;
             }
 
@@ -65,6 +79,7 @@ function startCamera() {
                 setTimeout(() => {
                     streaming = true;
                     statusDiv.innerHTML = '相機已啟動。請將名片置於畫面中央。';
+                    // 啟用偵測迴圈
                     processVideo(); 
                 }, 200); 
                 
@@ -72,6 +87,7 @@ function startCamera() {
                 const errMsg = `錯誤：影像播放失敗。請檢查錯誤碼: ${e.message || e.name}`;
                 statusDiv.innerHTML = errMsg;
                 console.error("DIAG ERROR: Video play failed:", e);
+                startButton.disabled = false; // 發生錯誤時重新啟用按鈕
             });
         });
     })
@@ -79,6 +95,7 @@ function startCamera() {
         const errMsg = `錯誤：無法存取相機。請檢查權限是否被拒絕。(Error: ${err.name} - ${err.message})`;
         statusDiv.innerHTML = errMsg;
         console.error("DIAG ERROR: 無法存取相機:", err);
+        startButton.disabled = false; // 發生錯誤時重新啟用按鈕
     });
 }
 
