@@ -16,12 +16,15 @@
     <!-- 顯示相機串流的區域，必須要有 playsinline/muted 支援行動裝置 -->
     <video id="video" playsinline muted autoplay></video>
     
+    <!-- 隱藏的緩衝區 Canvas，用於將影片幀傳遞給 OpenCV.js -->
+    <canvas id="canvasBuffer"></canvas>
+
     <!-- 即時顯示處理結果和邊框的區域 -->
     <canvas id="canvasOutput"></canvas>
 
     <div id="status">正在載入 OpenCV.js... 請稍候。</div>
 
-    <!-- 載入我們的主要邏輯檔案 (定義了 Module.onRuntimeInitialized) -->
+    <!-- 載入我們的主要邏輯檔案 (定義 Module) -->
     <script src="app.js"></script>
 
     <!-- 載入 OpenCV.js 函式庫 (必須在 app.js 之後載入) -->
