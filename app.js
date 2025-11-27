@@ -14,6 +14,18 @@ let dst = null; // 處理結果 Mat
 let streaming = false;
 let greenColor; // 確保不在頂層初始化 cv 相關物件
 
+// ** 新增 DOM 檢查和初始狀態設定 **
+if (startButton) {
+    // 初始狀態設定為載入中，等待 Module.onRuntimeInitialized 啟用它
+    startButton.innerHTML = 'OpenCV 載入中...';
+    startButton.disabled = true; 
+} else {
+    // 如果找不到按鈕，提供明確的錯誤訊息
+    statusDiv.innerHTML = '致命錯誤：找不到「startButton」按鈕元素。請確認 index.html 已更新！';
+    console.error("DIAG ERROR: startButton element not found. Check index.html.");
+}
+
+
 // 1. *** 核心修正: 使用 OpenCV 標準的初始化回呼函式 ***
 // 當 WebAssembly runtime 準備就緒後，會自動呼叫此函式
 Module.onRuntimeInitialized = function() {
