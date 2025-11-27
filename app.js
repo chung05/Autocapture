@@ -3,6 +3,7 @@
  * 採用 Module.onRuntimeInitialized 確保 OpenCV 核心載入完成，並強化相機啟動流程。
  *
  * 修正：將相機啟動邏輯移至按鈕點擊事件 (startButton)，並修正 Module 定義順序。
+ * 針對 iOS 無預覽問題，新增了 video 元素短暫顯示的診斷邏輯。
  */
 
 // 宣告全域變數 (在 Module 定義前宣告，但不賦值給 cv 相關物件)
@@ -92,16 +93,26 @@ function startCamera() {
 
             // 嘗試播放 video
             video.play().then(() => {
+                // ** iOS 相容性修正：短暫顯示 video 元素，確保它開始渲染 **
+                // 儘管 CSS 應該將其隱藏，但在 iOS 上，如果 video 元素完全不渲染，OpenCV 無法讀取幀。
+                // 這裡暫時顯示 video 元素，並在開始處理迴圈前將其隱藏。
+                video.style.display = 'block'; 
+                canvasOutput.style.display = 'none'; // 隱藏 canvas，避免疊加
+
                 statusDiv.innerHTML = '影像串流緩衝中...';
                 console.log("DIAG: video.play() 成功。準備進入處理迴圈...");
                 
-                // 增加 200ms 延遲，確保影像串流穩定，再開始處理迴圈
+                // 增加 300ms 延遲，給予 iOS 瀏覽器足夠時間啟動影像流
                 setTimeout(() => {
+                    // 恢復正常顯示：隱藏 video，顯示 canvas
+                    video.style.display = 'none'; 
+                    canvasOutput.style.display = 'block'; 
+
                     streaming = true;
                     statusDiv.innerHTML = '相機已啟動。請將名片置於畫面中央。';
                     // 啟用偵測迴圈
                     processVideo(); 
-                }, 200); 
+                }, 300); 
                 
             }).catch(e => {
                 const errMsg = `錯誤：影像播放失敗。請檢查錯誤碼: ${e.message || e.name}`;
