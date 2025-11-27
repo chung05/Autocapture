@@ -1,10 +1,11 @@
 /**
  * 名片掃描應用程式的主邏輯 (app.js) - 最終穩定版
- * 修正：
- * 1. 增加時間穩定性檢查 (STABILITY_THRESHOLD) 以確保對焦和圖像清晰度。
- * 2. 修正透視變換 (Perspective Transform) 的頂點排序邏輯，確保校正正確。
- * 3. 強化下載圖片邏輯，確保下載的圖片格式正確。
- * 4. 新增視覺回饋：名片鎖定後，邊框顏色會動態變化，指示穩定度進度。(新增功能)
+ * 最終修正與強化：
+ * 1. 【核心修正】強化穩定性機制：新增幾何穩定性檢查，確保名片在拍攝前，其位置、大小和形狀必須連續穩定。
+ * 2. 魯棒性增強：在 takeSnapshot 中加入 try...catch 區塊，防止 CV 運算錯誤導致應用程式卡在「處理中」。
+ * 3. 修正透視變換 (Perspective Transform) 的頂點排序邏輯，確保校正正確。
+ * 4. 強化下載圖片邏輯，確保下載的圖片格式正確。
+ * 5. 新增視覺回饋：名片鎖定後，邊框顏色會動態變化，指示穩定度進度。
  */
 
 // 宣告全域變數
@@ -16,7 +17,14 @@ let canvasBufferCtx = null;
 
 // 穩定性追蹤變數
 let stableFrameCount = 0;
-const STABILITY_THRESHOLD = 30; // 需要連續 15 幀穩定 (約 0.5 秒)
+// 新增追蹤上一個穩定輪廓的數據，用於幾何穩定性比較
+let lastStableRectData = null; // Stores {center: {x, y}, area}
+
+// 穩定性參數
+const STABILITY_THRESHOLD = 30; // 需要連續 30 幀 (約 1 秒) 保持幾何穩定
+const MOVEMENT_THRESHOLD = 15; // 允許的最大中心點移動距離 (像素)
+const AREA_CHANGE_THRESHOLD = 0.1; // 允許的最大面積變化比例 (10%)
+
 
 // 新增 DOM 元素參照
 let snapshotContainer = null;
@@ -103,6 +111,7 @@ function resetAndStartCamera() {
     startButton.style.display = 'block';      // 顯示開始按鈕
     statusDiv.innerHTML = '點擊「開始」重新拍攝。';
     stableFrameCount = 0; // 重設計數器
+    lastStableRectData = null; // 重設幾何數據
 }
 
 // 2. 啟動相機並設定串流 
@@ -164,7 +173,7 @@ function startCamera() {
     });
 }
 
-// 3. 影像處理迴圈 (核心邏輯 - 修正動態邊框) 
+// 3. 影像處理迴圈 (核心邏輯 - 修正動態邊框和穩定性機制) 
 function processVideo() {
     if (!streaming) return;
 
@@ -180,16 +189,51 @@ function processVideo() {
     dst = src.clone(); 
 
     let cardContour = detectCardBoundary(src); 
+    
+    // 檢查輪廓是否被找到且通過品質檢查
+    const isQualityOK = cardContour && isCardStableAndClear(cardContour);
 
-    if (cardContour) {
-        if (isCardStableAndClear(cardContour)) {
+    if (isQualityOK) {
+        // 獲取當前名片的幾何數據
+        let currentRect = cv.minAreaRect(cardContour);
+        let currentArea = cv.contourArea(cardContour);
+        let isGeometricallyStable = false;
+
+        if (lastStableRectData) {
+            // 進行幾何穩定性比較 (這是本次的核心修正)
+            const prevCenter = lastStableRectData.center;
+            const currCenter = currentRect.center;
+
+            // 1. 檢查中心點移動距離
+            const centerDistance = Math.sqrt(
+                Math.pow(currCenter.x - prevCenter.x, 2) + 
+                Math.pow(currCenter.y - prevCenter.y, 2)
+            );
+            
+            // 2. 檢查面積變化比例
+            const areaChangeRatio = Math.abs(currentArea - lastStableRectData.area) / lastStableRectData.area;
+
+            if (centerDistance < MOVEMENT_THRESHOLD && areaChangeRatio < AREA_CHANGE_THRESHOLD) {
+                isGeometricallyStable = true;
+            }
+        } else {
+            // 這是找到的第一個合格輪廓，先假設它穩定
+            isGeometricallyStable = true;
+        }
+        
+        if (isGeometricallyStable) {
              stableFrameCount++;
              
+             // 更新上一個穩定輪廓的數據
+             lastStableRectData = {
+                 center: { x: currentRect.center.x, y: currentRect.center.y },
+                 area: currentArea
+             };
+
              // 計算穩定度百分比
              const stabilityRatio = Math.min(stableFrameCount, STABILITY_THRESHOLD) / STABILITY_THRESHOLD;
              
-             // 顏色漸變：從橙色 (255, 165, 0) 透過黃色過渡到綠色 (0, 255, 0)
-             // 這裡使用更簡單的線性插值模擬從黃 (100, 255, 0) 到綠 (0, 255, 0)
+             // 顏色漸變：從黃 (100, 255, 0) 到綠 (0, 255, 0)
              const r = Math.round(100 * (1 - stabilityRatio)); 
              const g = 255;
              const b = 0; 
@@ -199,7 +243,7 @@ function processVideo() {
 
              drawContour(dst, cardContour, dynamicColor, dynamicThickness); 
 
-             statusDiv.innerHTML = `名片已鎖定！請保持穩定。進度：${Math.min(stableFrameCount, STABILITY_THRESHOLD)} / ${STABILITY_THRESHOLD}`;
+             statusDiv.innerHTML = `名片已鎖定！請保持**完全靜止**。穩定進度：${Math.min(stableFrameCount, STABILITY_THRESHOLD)} / ${STABILITY_THRESHOLD}`;
              
              if (stableFrameCount >= STABILITY_THRESHOLD) {
                 // 達到穩定門檻，拍照
@@ -207,18 +251,28 @@ function processVideo() {
              }
              dynamicColor.delete(); // 釋放動態顏色
         } else {
-             // 偵測到但還不穩定或不符合名片形狀
+             // 輪廓通過品質檢查，但移動或尺寸變化太大
              stableFrameCount = 0; // 重設計數器
+             
              const normalColor = new cv.Scalar(255, 165, 0, 255); // 橙色
              drawContour(dst, cardContour, normalColor, 3);
              normalColor.delete();
 
-             statusDiv.innerHTML = '偵測到物體，但仍在調整對焦與角度。';
+             statusDiv.innerHTML = '偵測到物體，但移動或抖動過大。請保持靜止！';
         }
+        currentRect.delete(); // 釋放 RotatedRect 記憶體
         cardContour.delete(); 
     } else {
+        // 沒有輪廓或輪廓品質不佳
         stableFrameCount = 0; // 重設計數器
-        statusDiv.innerHTML = '請將名片置於畫面中央。';
+        lastStableRectData = null; // 重設幾何數據
+        
+        if (cardContour && !isCardStableAndClear(cardContour)) {
+             cardContour.delete();
+             statusDiv.innerHTML = '偵測到輪廓，但形狀或長寬比不符名片要求。';
+        } else {
+             statusDiv.innerHTML = '請將名片置於畫面中央。';
+        }
     }
     
     cv.imshow('canvasOutput', dst); 
@@ -305,6 +359,9 @@ function isCardStableAndClear(contour) {
     let width = size.width;
     let height = size.height;
 
+    // 由於 minAreaRect 需要被釋放，在此處立即釋放
+    rect.delete(); 
+
     if (width < height) {
         [width, height] = [height, width];
     }
@@ -333,89 +390,120 @@ function drawContour(outputMat, contour, color, thickness) {
     contours.delete();
 }
 
-// 拍照功能 (修正頂點排序邏輯，確保透視變換正確)
+// 拍照功能 (修正頂點排序邏輯，確保透視變換正確, 並加入錯誤處理)
 function takeSnapshot(sourceMat, contour) {
     // 停止串流
     streaming = false;
     statusDiv.innerHTML = '處理中，請稍候...';
-
-    // 1. 取得名片四個頂點並進行魯棒排序 (修正邏輯)
-    let pointsArray = [];
-    for (let i = 0; i < contour.rows; ++i) {
-        pointsArray.push({
-            x: contour.data32S[i * 2],
-            y: contour.data32S[i * 2 + 1]
-        });
-    }
     
-    // 魯棒排序方法：使用 x+y 總和來區分對角線，然後用 x 座標來區分剩餘的點。
-    // 1.1. 根據 x+y 總和排序 (找到 TL 和 BR)
-    const points_xy_sorted = [...pointsArray].sort((a, b) => (a.x + a.y) - (b.x + b.y));
-    const pt_tl = points_xy_sorted[0]; // x+y 最小 = Top Left
-    const pt_br = points_xy_sorted[3]; // x+y 最大 = Bottom Right
+    // 宣告可能需要在 finally 或 catch 中釋放的 Mat 物件
+    let srcTri = null;
+    let dstTri = null;
+    let M = null;
+    let correctedCard = null;
 
-    // 1.2. 找到剩餘的兩個點 (TR 和 BL)
-    const pt_mid_1 = points_xy_sorted[1];
-    const pt_mid_2 = points_xy_sorted[2];
+    try {
+        // 1. 取得名片四個頂點並進行魯棒排序 (修正邏輯)
+        let pointsArray = [];
+        for (let i = 0; i < contour.rows; ++i) {
+            pointsArray.push({
+                x: contour.data32S[i * 2],
+                y: contour.data32S[i * 2 + 1]
+            });
+        }
+        
+        // 魯棒排序方法：使用 x+y 總和來區分對角線，然後用 x 座標來區分剩餘的點。
+        // 1.1. 根據 x+y 總和排序 (找到 TL 和 BR)
+        const points_xy_sorted = [...pointsArray].sort((a, b) => (a.x + a.y) - (b.x + b.y));
+        const pt_tl = points_xy_sorted[0]; // x+y 最小 = Top Left
+        const pt_br = points_xy_sorted[3]; // x+y 最大 = Bottom Right
 
-    // 1.3. 根據 x 座標區分 TR 和 BL (TR 的 x 座標較大)
-    const pt_tr = pt_mid_1.x > pt_mid_2.x ? pt_mid_1 : pt_mid_2;
-    const pt_bl = pt_mid_1.x < pt_mid_2.x ? pt_mid_1 : pt_mid_2;
+        // 1.2. 找到剩餘的兩個點 (TR 和 BL)
+        const pt_mid_1 = points_xy_sorted[1];
+        const pt_mid_2 = points_xy_sorted[2];
 
-    // 確保點的順序為：TL, TR, BR, BL (OpenCV 所需的順序)
-    const finalPoints = [pt_tl, pt_tr, pt_br, pt_bl];
+        // 1.3. 根據 x 座標區分 TR 和 BL (TR 的 x 座標較大)
+        const pt_tr = pt_mid_1.x > pt_mid_2.x ? pt_mid_1 : pt_mid_2;
+        const pt_bl = pt_mid_1.x < pt_mid_2.x ? pt_mid_1 : pt_mid_2;
 
-    // 2. 準備透視變換的來源和目標點
-    let srcTri = cv.matFromArray(4, 1, cv.CV_32FC2, [
-        finalPoints[0].x, finalPoints[0].y, // TL
-        finalPoints[1].x, finalPoints[1].y, // TR
-        finalPoints[2].x, finalPoints[2].y, // BR
-        finalPoints[3].x, finalPoints[3].y  // BL
-    ]);
+        // 確保點的順序為：TL, TR, BR, BL (OpenCV 所需的順序)
+        const finalPoints = [pt_tl, pt_tr, pt_br, pt_bl];
 
-    // 計算名片校正後的大小
-    let width = Math.sqrt(Math.pow(pt_tr.x - pt_tl.x, 2) + Math.pow(pt_tr.y - pt_tl.y, 2));
-    let height = Math.sqrt(Math.pow(pt_bl.x - pt_tl.x, 2) + Math.pow(pt_bl.y - pt_tl.y, 2));
-    
-    // 由於計算出來的 width/height 可能是浮點數且受噪音影響，將其四捨五入為整數
-    width = Math.round(width);
-    height = Math.round(height);
+        // 2. 準備透視變換的來源和目標點
+        srcTri = cv.matFromArray(4, 1, cv.CV_32FC2, [
+            finalPoints[0].x, finalPoints[0].y, // TL
+            finalPoints[1].x, finalPoints[1].y, // TR
+            finalPoints[2].x, finalPoints[2].y, // BR
+            finalPoints[3].x, finalPoints[3].y  // BL
+        ]);
 
-    // 目標矩形點 (校正後的影像會變成這個大小)
-    let dstTri = cv.matFromArray(4, 1, cv.CV_32FC2, [
-        0, 0,
-        width, 0,
-        width, height,
-        0, height
-    ]);
+        // 計算名片校正後的大小
+        let width = Math.sqrt(Math.pow(pt_tr.x - pt_tl.x, 2) + Math.pow(pt_tr.y - pt_tl.y, 2));
+        let height = Math.sqrt(Math.pow(pt_bl.x - pt_tl.x, 2) + Math.pow(pt_bl.y - pt_tl.y, 2));
+        
+        // 由於計算出來的 width/height 可能是浮點數且受噪音影響，將其四捨五入為整數
+        width = Math.round(width);
+        height = Math.round(height);
 
-    // 3. 執行透視變換
-    let M = cv.getPerspectiveTransform(srcTri, dstTri);
-    let dsize = new cv.Size(width, height);
-    let correctedCard = new cv.Mat();
-    cv.warpPerspective(sourceMat, correctedCard, M, dsize, cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar());
+        // 如果計算出的尺寸過小或無效，則拋出錯誤
+        if (width < 100 || height < 100) {
+            throw new Error("校正尺寸過小或無效 (W:" + width + " H:" + height + ")");
+        }
 
-    // 4. 將校正後的圖片顯示到 img 標籤
-    cv.imshow(snapshotImage, correctedCard);
-    snapshotImage.style.width = '100%'; // 確保圖片在容器內自適應
-    snapshotImage.style.height = 'auto';
 
-    // 釋放記憶體
-    srcTri.delete();
-    dstTri.delete();
-    M.delete();
-    correctedCard.delete();
+        // 目標矩形點 (校正後的影像會變成這個大小)
+        dstTri = cv.matFromArray(4, 1, cv.CV_32FC2, [
+            0, 0,
+            width, 0,
+            width, height,
+            0, height
+        ]);
 
-    // 隱藏預覽 Canvas，顯示結果
-    canvasOutput.style.display = 'none';
-    snapshotContainer.style.display = 'block';
+        // 3. 執行透視變換
+        M = cv.getPerspectiveTransform(srcTri, dstTri);
+        let dsize = new cv.Size(width, height);
+        correctedCard = new cv.Mat();
+        cv.warpPerspective(sourceMat, correctedCard, M, dsize, cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar());
 
-    statusDiv.innerHTML = '拍攝完成，已自動校正。';
-    console.log("快照已拍攝，透視變換完成並顯示。");
+        // 4. 將校正後的圖片顯示到 img 標籤
+        cv.imshow(snapshotImage, correctedCard);
+        snapshotImage.style.width = '100%'; // 確保圖片在容器內自適應
+        snapshotImage.style.height = 'auto';
 
-    // 停止相機串流 (真正停止硬體)
-    if (video.srcObject) {
-        video.srcObject.getTracks().forEach(track => track.stop());
-        video.srcObject = null;
+        // 隱藏預覽 Canvas，顯示結果
+        canvasOutput.style.display = 'none';
+        snapshotContainer.style.display = 'block';
+
+        statusDiv.innerHTML = '拍攝完成，已自動校正。';
+        console.log("快照已拍攝，透視變換完成並顯示。");
+
+        // 停止相機串流 (真正停止硬體)
+        if (video.srcObject) {
+            video.srcObject.getTracks().forEach(track => track.stop());
+            video.srcObject = null;
+        }
+
+    } catch (error) {
+        // 處理 CV 邏輯中的任何錯誤 (避免停在「處理中」)
+        console.error("DIAG ERROR: 拍照處理失敗，正在重設：", error);
+        
+        // 確保相機串流被停止
+        if (video.srcObject) {
+            video.srcObject.getTracks().forEach(track => track.stop());
+            video.srcObject = null;
+        }
+        
+        // 顯示錯誤訊息並讓使用者重試
+        statusDiv.innerHTML = `錯誤：名片處理失敗 (原因：${error.message})。請重試並確認名片邊緣清晰。`;
+        
+        // 自動重設應用程式，讓使用者可以點擊「開始」重試
+        resetAndStartCamera(); 
+
+    } finally {
+        // 釋放記憶體
+        if (srcTri && !srcTri.isDeleted()) srcTri.delete();
+        if (dstTri && !dstTri.isDeleted()) dstTri.delete();
+        if (M && !M.isDeleted()) M.delete();
+        if (correctedCard && !correctedCard.isDeleted()) correctedCard.delete();
     }
 }
