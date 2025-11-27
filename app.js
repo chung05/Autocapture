@@ -9,12 +9,12 @@ let cap = null;
 let src = null; // 原始影像 Mat
 let dst = null; // 處理結果 Mat
 let streaming = false;
-let greenColor; // 移除了 cv.Scalar 的初始化，改為在 runtime 初始化時設定
+let greenColor; // 確保不在頂層初始化 cv 相關物件
 
 // 1. *** 核心修正: 使用 OpenCV 標準的初始化回呼函式 ***
 // 當 WebAssembly runtime 準備就緒後，會自動呼叫此函式
 Module.onRuntimeInitialized = function() {
-    // 在這裡初始化所有依賴 cv 物件的變數
+    // 關鍵修正點：在這裡初始化所有依賴 cv 物件的變數，確保 cv 已載入
     greenColor = new cv.Scalar(0, 255, 0, 255); // 綠色 (用於繪製邊框)
     
     statusDiv.innerHTML = 'OpenCV 載入完成，正在啟動相機...';
