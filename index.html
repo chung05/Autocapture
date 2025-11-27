@@ -10,6 +10,9 @@
 
     <h1>名片自動拍攝</h1>
     
+    <!-- 開始按鈕：預設為禁用，直到 OpenCV 載入完成才啟用 -->
+    <button id="startButton" disabled>點擊開始 (載入中...)</button>
+    
     <!-- 顯示相機串流的區域，必須要有 playsinline/muted 支援行動裝置 -->
     <video id="video" playsinline muted autoplay></video>
     
@@ -21,7 +24,7 @@
     <!-- 載入我們的主要邏輯檔案 (定義了 Module.onRuntimeInitialized) -->
     <script src="app.js"></script>
 
-    <!-- 載入 OpenCV.js 函式庫 (讓它自動呼叫 Module.onRuntimeInitialized) -->
+    <!-- 載入 OpenCV.js 函式庫 (必須在 app.js 之後載入) -->
     <script src="https://docs.opencv.org/4.9.0/opencv.js"></script>
 </body>
 </html>
