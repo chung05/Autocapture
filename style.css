@@ -10,6 +10,28 @@ body {
     width: 100vw;
 }
 
+#startButton {
+    padding: 10px 20px;
+    font-size: 1.1em;
+    margin: 15px 0;
+    background-color: #007bff;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background-color 0.3s ease;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+#startButton:hover:not(:disabled) {
+    background-color: #0056b3;
+}
+
+#startButton:disabled {
+    background-color: #cccccc;
+    cursor: not-allowed;
+}
+
 #video {
     /* 隱藏原始的 video 元素 */
     display: none; 
@@ -34,4 +56,6 @@ body {
     padding: 10px;
     background-color: #fff;
     border-radius: 5px;
+    color: #333;
+    font-weight: bold;
 }
