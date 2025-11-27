@@ -1,0 +1,27 @@
+body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    background-color: #f0f0f0;
+    margin: 0;
+    font-family: sans-serif;
+}
+
+#video {
+    /* 隱藏原始的 video 元素，我們只在 canvas 上顯示處理後的結果 */
+    display: none; 
+}
+
+#canvasOutput {
+    /* 讓 canvas 成為畫面的主要顯示區域 */
+    max-width: 100vw;
+    max-height: 80vh; 
+    border: 1px solid black;
+}
+
+#status {
+    margin-top: 20px;
+    padding: 10px;
+    background-color: #fff;
+    border-radius: 5px;
+}
