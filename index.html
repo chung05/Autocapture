@@ -10,14 +10,18 @@
 
     <h1>名片自動拍攝</h1>
     
+    <!-- 顯示相機串流的區域，必須要有 playsinline/muted 支援行動裝置 -->
     <video id="video" playsinline muted autoplay></video>
     
+    <!-- 即時顯示處理結果和邊框的區域 -->
     <canvas id="canvasOutput"></canvas>
 
     <div id="status">正在載入 OpenCV.js... 請稍候。</div>
 
-    <script async src="https://docs.opencv.org/4.9.0/opencv.js" onload="onOpenCvReady()"></script>
-    
+    <!-- 載入我們的主要邏輯檔案 (定義了 Module.onRuntimeInitialized) -->
     <script src="app.js"></script>
+
+    <!-- 載入 OpenCV.js 函式庫 (讓它自動呼叫 Module.onRuntimeInitialized) -->
+    <script src="https://docs.opencv.org/4.9.0/opencv.js"></script>
 </body>
 </html>
