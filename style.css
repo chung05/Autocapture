@@ -5,6 +5,7 @@ body {
     background-color: #f0f0f0;
     margin: 0;
     font-family: sans-serif;
+    /* 讓 body 至少佔滿整個視窗高度 */
     min-height: 100vh; 
     width: 100vw;
 }
