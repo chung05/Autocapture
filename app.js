@@ -1,23 +1,18 @@
 /**
  * 名片掃描應用程式的主邏輯 (app.js) - 最終穩定版
- * 採用 Module.onRuntimeInitialized 確保 OpenCV 核心載入完成，並強化相機啟動流程。
- *
- * 修正：將相機啟動邏輯移至按鈕點擊事件 (startButton)，並修正 Module 定義順序。
- * 針對 iOS 無預覽問題，新增了 video 元素短暫顯示的診斷邏輯。
+ * 採用 Canvas 緩衝區方式讀取影格，徹底解決 iOS 和 PC 端的尺寸/讀取問題。
  */
 
 // 宣告全域變數 (在 Module 定義前宣告，但不賦值給 cv 相關物件)
-let cap = null;
 let src = null; // 原始影像 Mat
 let dst = null; // 處理結果 Mat
 let streaming = false;
-let greenColor; // 確保不在頂層初始化 cv 相關物件
+let greenColor; 
+let canvasBuffer = null; // 緩衝區 Canvas
+let canvasBufferCtx = null; // 緩衝區 Context
 
 // ** 核心修正：定義全域 Module 物件，以避免 ReferenceError **
-// 此物件必須在 app.js 檔案中盡可能早地被定義。
 var Module = {
-    // 1. *** 核心修正: 使用 OpenCV 標準的初始化回呼函式 ***
-    // 當 WebAssembly runtime 準備就緒後，會自動呼叫此函式
     onRuntimeInitialized: function() {
         // 關鍵修正點：在這裡初始化所有依賴 cv 物件的變數，確保 cv 已載入
         greenColor = new cv.Scalar(0, 255, 0, 255); // 綠色 (用於繪製邊框)
@@ -39,16 +34,19 @@ const video = document.getElementById('video');
 const canvasOutput = document.getElementById('canvasOutput');
 const statusDiv = document.getElementById('status');
 const startButton = document.getElementById('startButton'); 
+// 取得緩衝區 Canvas
+canvasBuffer = document.getElementById('canvasBuffer');
+
 
 // ** 新增 DOM 檢查和初始狀態設定 **
-if (startButton) {
+if (startButton && canvasBuffer) {
     // 初始狀態設定為載入中，等待 Module.onRuntimeInitialized 啟用它
     startButton.innerHTML = 'OpenCV 載入中...';
     startButton.disabled = true; 
 } else {
     // 如果找不到按鈕，提供明確的錯誤訊息
-    statusDiv.innerHTML = '致命錯誤：找不到「startButton」按鈕元素。請確認 index.html 已更新！';
-    console.error("DIAG ERROR: startButton element not found. Check index.html.");
+    statusDiv.innerHTML = '致命錯誤：找不到必要的 DOM 元素 (startButton 或 canvasBuffer)。請確認 index.html 已更新！';
+    console.error("DIAG ERROR: Missing critical DOM elements. Check index.html.");
 }
 
 
@@ -57,7 +55,6 @@ function startCamera() {
     startButton.disabled = true; // 避免重複點擊
     statusDiv.innerHTML = '正在請求相機權限...';
     
-    // 請求後置鏡頭，避免使用進階限制來確保 iOS 相容性
     navigator.mediaDevices.getUserMedia({
         video: {
             facingMode: 'environment', 
@@ -68,57 +65,43 @@ function startCamera() {
         
         console.log("DIAG: getUserMedia 成功取得串流。等待 loadeddata 事件...");
         
-        // 使用 'loadeddata' 事件，確保影像串流的資料已開始緩衝
         video.addEventListener('loadeddata', function initializeVideoAndStartLoop() {
             video.removeEventListener('loadeddata', initializeVideoAndStartLoop);
 
-            // *** 關鍵診斷點 ***：確認影像尺寸是否正確讀取。若為 0x0，則串流未準備好。
+            // 確保尺寸正確
             console.log(`DIAG: loadeddata 事件觸發。串流解析度: ${video.videoWidth}x${video.videoHeight}`);
 
             if (video.videoWidth === 0 || video.videoHeight === 0) {
                  const errMsg = '致命錯誤：串流尺寸為 0x0。請重新整理或檢查相機資源是否被佔用。';
                  statusDiv.innerHTML = errMsg;
-                 console.error("DIAG ERROR: Video stream reports 0x0 dimensions after loadeddata.");
-                 startButton.disabled = false; // 發生錯誤時重新啟用按鈕
+                 startButton.disabled = false; 
                  return;
             }
 
-            // 設定 canvas 像素解析度與 video 串流相同
-            canvasOutput.width = video.videoWidth;
-            canvasOutput.height = video.videoHeight;
+            // 設定 Canvas 緩衝區和輸出 Canvas 的像素解析度
+            canvasOutput.width = canvasBuffer.width = video.videoWidth;
+            canvasOutput.height = canvasBuffer.height = video.videoHeight;
             
-            // 初始化 OpenCV Mat 結構
+            // 取得緩衝區的 2D Context
+            canvasBufferCtx = canvasBuffer.getContext('2d');
+            
+            // 初始化 OpenCV Mat 結構 (只需初始化一次)
             src = new cv.Mat(video.videoHeight, video.videoWidth, cv.CV_8UC4);
             dst = new cv.Mat(video.videoHeight, video.videoWidth, cv.CV_8UC4);
 
             // 嘗試播放 video
             video.play().then(() => {
-                // ** iOS 相容性修正：短暫顯示 video 元素，確保它開始渲染 **
-                // 儘管 CSS 應該將其隱藏，但在 iOS 上，如果 video 元素完全不渲染，OpenCV 無法讀取幀。
-                // 這裡暫時顯示 video 元素，並在開始處理迴圈前將其隱藏。
-                video.style.display = 'block'; 
-                canvasOutput.style.display = 'none'; // 隱藏 canvas，避免疊加
-
-                statusDiv.innerHTML = '影像串流緩衝中...';
+                statusDiv.innerHTML = '影像串流啟動成功，開始處理...';
                 console.log("DIAG: video.play() 成功。準備進入處理迴圈...");
                 
-                // 增加 300ms 延遲，給予 iOS 瀏覽器足夠時間啟動影像流
-                setTimeout(() => {
-                    // 恢復正常顯示：隱藏 video，顯示 canvas
-                    video.style.display = 'none'; 
-                    canvasOutput.style.display = 'block'; 
-
-                    streaming = true;
-                    statusDiv.innerHTML = '相機已啟動。請將名片置於畫面中央。';
-                    // 啟用偵測迴圈
-                    processVideo(); 
-                }, 300); 
+                // 開始處理迴圈
+                streaming = true;
+                processVideo(); 
                 
             }).catch(e => {
                 const errMsg = `錯誤：影像播放失敗。請檢查錯誤碼: ${e.message || e.name}`;
                 statusDiv.innerHTML = errMsg;
-                console.error("DIAG ERROR: Video play failed:", e);
-                startButton.disabled = false; // 發生錯誤時重新啟用按鈕
+                startButton.disabled = false; 
             });
         });
     })
@@ -126,7 +109,7 @@ function startCamera() {
         const errMsg = `錯誤：無法存取相機。請檢查權限是否被拒絕。(Error: ${err.name} - ${err.message})`;
         statusDiv.innerHTML = errMsg;
         console.error("DIAG ERROR: 無法存取相機:", err);
-        startButton.disabled = false; // 發生錯誤時重新啟用按鈕
+        startButton.disabled = false; 
     });
 }
 
@@ -134,13 +117,14 @@ function startCamera() {
 function processVideo() {
     if (!streaming) return;
 
-    if (!cap) {
-        // 在這裡才初始化 VideoCapture
-        cap = new cv.VideoCapture(video);
-    }
+    // *** 核心修正：使用 Canvas 緩衝區讀取影格，取代 cv.VideoCapture ***
+    // 1. 將 video 的當前幀繪製到隱藏的緩衝區 Canvas 上
+    canvasBufferCtx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight);
     
-    // 讀取並複製影像
-    cap.read(src);
+    // 2. 從緩衝區 Canvas 讀取影像到 OpenCV Mat (src)
+    src = cv.imread(canvasBuffer);
+
+    // 進行影像處理
     src.copyTo(dst); 
 
     // 進行名片邊緣偵測
@@ -160,8 +144,11 @@ function processVideo() {
         statusDiv.innerHTML = '請將名片置於畫面中央。';
     }
     
-    // 輸出處理後的影像到 canvas
+    // 輸出處理後的影像到 canvasOutput
     cv.imshow('canvasOutput', dst); 
+    
+    // 釋放 Mat 資源 (雖然 src 會在下次讀取時被覆寫，但主動釋放確保資源不洩漏)
+    src.delete();
     
     // 請求下一幀畫面
     requestAnimationFrame(processVideo); 
@@ -214,7 +201,7 @@ function detectCardBoundary(inputMat) {
         return largestContour;
 
     } catch (e) {
-        // console.error("CV Detection Error:", e); // 在生產環境中可以註解掉，避免過多日誌
+        // console.error("CV Detection Error:", e); 
         return null;
     } finally {
         // 釋放記憶體
@@ -231,7 +218,8 @@ function isCardStableAndClear(contour) {
     if (!contour) return false;
     
     let area = cv.contourArea(contour);
-    let totalArea = src.cols * src.rows;
+    // 注意：src 已經在 processVideo 結束時釋放，這裡需要用當前的 Mat 尺寸計算
+    let totalArea = src.cols * src.rows; 
     
     // 確保面積在合理範圍內
     if (area < totalArea * 0.1 || area > totalArea * 0.7) {
