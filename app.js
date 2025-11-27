@@ -16,7 +16,7 @@ let canvasBufferCtx = null;
 
 // 穩定性追蹤變數
 let stableFrameCount = 0;
-const STABILITY_THRESHOLD = 15; // 需要連續 15 幀穩定 (約 0.5 秒)
+const STABILITY_THRESHOLD = 30; // 需要連續 15 幀穩定 (約 0.5 秒)
 
 // 新增 DOM 元素參照
 let snapshotContainer = null;
