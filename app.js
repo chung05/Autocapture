@@ -1,16 +1,16 @@
 /**
  * 名片掃描應用程式的主邏輯 (app.js) - 最終穩定版
  * 修正：
- * 1. 增加時間穩定性檢查 (STABILITY_THRESHOLD) 以確保對焦和圖像清晰度。(解決問題 1)
- * 2. 修正透視變換 (Perspective Transform) 的頂點排序邏輯，確保校正正確。(解決問題 2)
- * 3. 強化下載圖片邏輯，確保下載的圖片格式正確。(解決問題 3)
+ * 1. 增加時間穩定性檢查 (STABILITY_THRESHOLD) 以確保對焦和圖像清晰度。
+ * 2. 修正透視變換 (Perspective Transform) 的頂點排序邏輯，確保校正正確。
+ * 3. 強化下載圖片邏輯，確保下載的圖片格式正確。
+ * 4. 新增視覺回饋：名片鎖定後，邊框顏色會動態變化，指示穩定度進度。(新增功能)
  */
 
 // 宣告全域變數
 let src = null; 
 let dst = null; 
 let streaming = false;
-let greenColor; 
 let canvasBuffer = null; 
 let canvasBufferCtx = null; 
 
@@ -27,7 +27,7 @@ let retakeButton = null;
 // ** 核心修正：定義全域 Module 物件，以避免 ReferenceError **
 var Module = {
     onRuntimeInitialized: function() {
-        greenColor = new cv.Scalar(0, 255, 0, 255);
+        // greenColor = new cv.Scalar(0, 255, 0, 255); // 移除固定顏色定義
         
         statusDiv.innerHTML = 'OpenCV 載入完成。請點擊「開始」按鈕。';
         console.log("DIAG: Module.onRuntimeInitialized 成功，OpenCV 核心已準備就緒。");
@@ -48,6 +48,15 @@ var Module = {
                 tempCanvas.width = img.naturalWidth || 800;
                 tempCanvas.height = img.naturalHeight || 500;
                 const tempCtx = tempCanvas.getContext('2d');
+                
+                // 檢查 img 是否有 src 或數據，如果沒有，無法繪製
+                if (!img.src || img.naturalWidth === 0) {
+                    // 使用非 alert 的方式提示使用者
+                    statusDiv.innerHTML = '無法下載：圖片數據不存在。請重新拍攝。';
+                    console.error('無法下載：圖片數據不存在。');
+                    return;
+                }
+                
                 tempCtx.drawImage(img, 0, 0, tempCanvas.width, tempCanvas.height);
 
                 const a = document.createElement('a');
@@ -96,15 +105,19 @@ function resetAndStartCamera() {
     stableFrameCount = 0; // 重設計數器
 }
 
-// 2. 啟動相機並設定串流 (無變動)
+// 2. 啟動相機並設定串流 
 function startCamera() {
     startButton.style.display = 'none'; // 隱藏開始按鈕
     canvasOutput.style.display = 'block'; // 確保 Canvas 預覽顯示
     statusDiv.innerHTML = '正在請求相機權限...';
     
+    // 在 iOS/Safari 上，需要更精確地請求環境鏡頭
     navigator.mediaDevices.getUserMedia({
         video: {
-            facingMode: 'environment', 
+            facingMode: 'environment',
+            // 嘗試添加約束來改善對焦，雖然不保證有效，但值得一試
+            // autoFocus: true, // 僅適用於特定的瀏覽器/環境
+            // focusMode: "continuous" 
         }
     })
     .then(stream => {
@@ -151,7 +164,7 @@ function startCamera() {
     });
 }
 
-// 3. 影像處理迴圈 (核心邏輯) 
+// 3. 影像處理迴圈 (核心邏輯 - 修正動態邊框) 
 function processVideo() {
     if (!streaming) return;
 
@@ -169,20 +182,37 @@ function processVideo() {
     let cardContour = detectCardBoundary(src); 
 
     if (cardContour) {
-        drawContour(dst, cardContour); 
-
         if (isCardStableAndClear(cardContour)) {
              stableFrameCount++;
-             // 顯示穩定度進度 (Issue #1 修正)
-             statusDiv.innerHTML = `名片已鎖定！穩定度：${Math.min(stableFrameCount, STABILITY_THRESHOLD)} / ${STABILITY_THRESHOLD}`;
+             
+             // 計算穩定度百分比
+             const stabilityRatio = Math.min(stableFrameCount, STABILITY_THRESHOLD) / STABILITY_THRESHOLD;
+             
+             // 顏色漸變：從橙色 (255, 165, 0) 透過黃色過渡到綠色 (0, 255, 0)
+             // 這裡使用更簡單的線性插值模擬從黃 (100, 255, 0) 到綠 (0, 255, 0)
+             const r = Math.round(100 * (1 - stabilityRatio)); 
+             const g = 255;
+             const b = 0; 
+             
+             const dynamicColor = new cv.Scalar(r, g, b, 255);
+             const dynamicThickness = Math.round(3 + 3 * stabilityRatio); // 粗細從 3 漸變到 6
+
+             drawContour(dst, cardContour, dynamicColor, dynamicThickness); 
+
+             statusDiv.innerHTML = `名片已鎖定！請保持穩定。進度：${Math.min(stableFrameCount, STABILITY_THRESHOLD)} / ${STABILITY_THRESHOLD}`;
              
              if (stableFrameCount >= STABILITY_THRESHOLD) {
                 // 達到穩定門檻，拍照
                 takeSnapshot(src, cardContour); 
              }
+             dynamicColor.delete(); // 釋放動態顏色
         } else {
              // 偵測到但還不穩定或不符合名片形狀
              stableFrameCount = 0; // 重設計數器
+             const normalColor = new cv.Scalar(255, 165, 0, 255); // 橙色
+             drawContour(dst, cardContour, normalColor, 3);
+             normalColor.delete();
+
              statusDiv.innerHTML = '偵測到物體，但仍在調整對焦與角度。';
         }
         cardContour.delete(); 
@@ -287,29 +317,29 @@ function isCardStableAndClear(contour) {
     return true; 
 }
 
-// 在影像上繪製輪廓 (無變動)
-function drawContour(outputMat, contour) {
+// 在影像上繪製輪廓 (修改：加入動態顏色和粗細)
+function drawContour(outputMat, contour, color, thickness) {
     let contours = new cv.MatVector();
     contours.push_back(contour);
 
-    cv.drawContours(outputMat, contours, 0, greenColor, 5, cv.LINE_8);
+    cv.drawContours(outputMat, contours, 0, color, thickness, cv.LINE_8);
     
     let points = contour.data32S;
     for (let i = 0; i < points.length; i += 2) {
         let center = new cv.Point(points[i], points[i+1]);
-        cv.circle(outputMat, center, 10, greenColor, -1); 
+        cv.circle(outputMat, center, thickness * 2, color, -1); 
     }
     
     contours.delete();
 }
 
-// 拍照功能 (修正頂點排序邏輯，確保透視變換正確 - 修正 Issue #2)
+// 拍照功能 (修正頂點排序邏輯，確保透視變換正確)
 function takeSnapshot(sourceMat, contour) {
     // 停止串流
     streaming = false;
     statusDiv.innerHTML = '處理中，請稍候...';
 
-    // 1. 取得名片四個頂點並進行魯棒排序
+    // 1. 取得名片四個頂點並進行魯棒排序 (修正邏輯)
     let pointsArray = [];
     for (let i = 0; i < contour.rows; ++i) {
         pointsArray.push({
@@ -317,37 +347,35 @@ function takeSnapshot(sourceMat, contour) {
             y: contour.data32S[i * 2 + 1]
         });
     }
-
-    // 魯棒排序：確保點的順序正確：TL, TR, BR, BL
-    // 1.1. 找出 TL (x+y 最小) 和 BR (x+y 最大)
-    pointsArray.sort((a, b) => (a.x + a.y) - (b.x + b.y));
-    const point_tl_or_tr = pointsArray[0];
-    const point_br_or_bl = pointsArray[3];
     
-    // 1.2. 找出 BL (x-y 最小) 和 TR (x-y 最大)
-    pointsArray.sort((a, b) => (a.x - a.y) - (b.x - a.y));
-    const point_bl_or_tl = pointsArray[0];
-    const point_tr_or_br = pointsArray[3];
+    // 魯棒排序方法：使用 x+y 總和來區分對角線，然後用 x 座標來區分剩餘的點。
+    // 1.1. 根據 x+y 總和排序 (找到 TL 和 BR)
+    const points_xy_sorted = [...pointsArray].sort((a, b) => (a.x + a.y) - (b.x + b.y));
+    const pt_tl = points_xy_sorted[0]; // x+y 最小 = Top Left
+    const pt_br = points_xy_sorted[3]; // x+y 最大 = Bottom Right
 
-    // 最終分配
-    const topLeft = (point_tl_or_tr.x + point_tl_or_tr.y) < (point_bl_or_tl.x + point_bl_or_tl.y) ? point_tl_or_tr : point_bl_or_tl;
-    const bottomRight = (point_br_or_bl.x + point_br_or_bl.y) > (point_tr_or_br.x + point_tr_or_br.y) ? point_br_or_bl : point_tr_or_br;
+    // 1.2. 找到剩餘的兩個點 (TR 和 BL)
+    const pt_mid_1 = points_xy_sorted[1];
+    const pt_mid_2 = points_xy_sorted[2];
 
-    const remaining = pointsArray.filter(p => p !== topLeft && p !== bottomRight);
-    const topRight = remaining[0].x > remaining[1].x ? remaining[0] : remaining[1];
-    const bottomLeft = remaining[0].x < remaining[1].x ? remaining[0] : remaining[1];
+    // 1.3. 根據 x 座標區分 TR 和 BL (TR 的 x 座標較大)
+    const pt_tr = pt_mid_1.x > pt_mid_2.x ? pt_mid_1 : pt_mid_2;
+    const pt_bl = pt_mid_1.x < pt_mid_2.x ? pt_mid_1 : pt_mid_2;
+
+    // 確保點的順序為：TL, TR, BR, BL (OpenCV 所需的順序)
+    const finalPoints = [pt_tl, pt_tr, pt_br, pt_bl];
 
     // 2. 準備透視變換的來源和目標點
     let srcTri = cv.matFromArray(4, 1, cv.CV_32FC2, [
-        topLeft.x, topLeft.y,
-        topRight.x, topRight.y,
-        bottomRight.x, bottomRight.y,
-        bottomLeft.x, bottomLeft.y
+        finalPoints[0].x, finalPoints[0].y, // TL
+        finalPoints[1].x, finalPoints[1].y, // TR
+        finalPoints[2].x, finalPoints[2].y, // BR
+        finalPoints[3].x, finalPoints[3].y  // BL
     ]);
 
     // 計算名片校正後的大小
-    let width = Math.sqrt(Math.pow(topRight.x - topLeft.x, 2) + Math.pow(topRight.y - topLeft.y, 2));
-    let height = Math.sqrt(Math.pow(bottomLeft.x - topLeft.x, 2) + Math.pow(bottomLeft.y - topLeft.y, 2));
+    let width = Math.sqrt(Math.pow(pt_tr.x - pt_tl.x, 2) + Math.pow(pt_tr.y - pt_tl.y, 2));
+    let height = Math.sqrt(Math.pow(pt_bl.x - pt_tl.x, 2) + Math.pow(pt_bl.y - pt_tl.y, 2));
     
     // 由於計算出來的 width/height 可能是浮點數且受噪音影響，將其四捨五入為整數
     width = Math.round(width);
@@ -369,6 +397,8 @@ function takeSnapshot(sourceMat, contour) {
 
     // 4. 將校正後的圖片顯示到 img 標籤
     cv.imshow(snapshotImage, correctedCard);
+    snapshotImage.style.width = '100%'; // 確保圖片在容器內自適應
+    snapshotImage.style.height = 'auto';
 
     // 釋放記憶體
     srcTri.delete();
