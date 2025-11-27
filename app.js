@@ -1,35 +1,50 @@
 /**
  * 名片掃描應用程式的主邏輯 (app.js) - 最終穩定版
- * 採用 Canvas 緩衝區方式讀取影格，徹底解決 iOS 和 PC 端的尺寸/讀取問題。
- *
- * 最終修正：
- * 1. 修正 Mat 記憶體管理，確保每次讀取新 Mat 時，前一幀的 Mat 資源被釋放 (解決 PC 端 Bad size 錯誤)。
- * 2. 啟用 takeSnapshot 函式 (解決 iPhone 端無法自動拍照問題)。
- * 3. 強化 isCardStableAndClear 邏輯，放寬面積範圍並新增長寬比檢查 (解決 iPhone 鎖定失敗問題)。
+ * 實現完整的自動拍照流程，包括透視變換和結果顯示。
  */
 
 // 宣告全域變數
-let src = null; // 原始影像 Mat (會在 processVideo 中重新創建/賦值)
-let dst = null; // 處理結果 Mat (會在 processVideo 中重新創建/賦值)
+let src = null; 
+let dst = null; 
 let streaming = false;
 let greenColor; 
-let canvasBuffer = null; // 緩衝區 Canvas 元素
-let canvasBufferCtx = null; // 緩衝區 Canvas 2D Context
+let canvasBuffer = null; 
+let canvasBufferCtx = null; 
+
+// 新增 DOM 元素參照
+let snapshotContainer = null;
+let snapshotImage = null;
+let downloadSnapshot = null;
+let retakeButton = null;
 
 // ** 核心修正：定義全域 Module 物件，以避免 ReferenceError **
 var Module = {
     onRuntimeInitialized: function() {
-        // 關鍵修正點：在這裡初始化所有依賴 cv 物件的變數，確保 cv 已載入
-        greenColor = new cv.Scalar(0, 255, 0, 255); // 綠色 (用於繪製邊框)
+        greenColor = new cv.Scalar(0, 255, 0, 255);
         
         statusDiv.innerHTML = 'OpenCV 載入完成。請點擊「開始」按鈕。';
         console.log("DIAG: Module.onRuntimeInitialized 成功，OpenCV 核心已準備就緒。");
         
-        // 將相機啟動邏輯綁定到按鈕點擊事件
         if (startButton) {
             startButton.addEventListener('click', startCamera);
-            startButton.disabled = false; // 載入完成後啟用按鈕
+            startButton.disabled = false;
             startButton.innerHTML = '點擊開始';
+        }
+
+        // 初始化拍照結果顯示區域的事件監聽器
+        if (downloadSnapshot) {
+            downloadSnapshot.addEventListener('click', () => {
+                const img = document.getElementById('snapshotImage');
+                const a = document.createElement('a');
+                a.href = img.src;
+                a.download = 'business_card.png';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+            });
+        }
+        if (retakeButton) {
+            retakeButton.addEventListener('click', resetAndStartCamera);
         }
     }
 };
@@ -39,25 +54,36 @@ const video = document.getElementById('video');
 const canvasOutput = document.getElementById('canvasOutput');
 const statusDiv = document.getElementById('status');
 const startButton = document.getElementById('startButton'); 
-// 取得緩衝區 Canvas
 canvasBuffer = document.getElementById('canvasBuffer');
+
+// 新增 DOM 元素參照
+snapshotContainer = document.getElementById('snapshotContainer');
+snapshotImage = document.getElementById('snapshotImage');
+downloadSnapshot = document.getElementById('downloadSnapshot');
+retakeButton = document.getElementById('retakeButton');
 
 
 // ** 新增 DOM 檢查和初始狀態設定 **
-if (startButton && canvasBuffer) {
-    // 初始狀態設定為載入中，等待 Module.onRuntimeInitialized 啟用它
+if (startButton && canvasBuffer && snapshotContainer && snapshotImage && downloadSnapshot && retakeButton) {
     startButton.innerHTML = 'OpenCV 載入中...';
     startButton.disabled = true; 
 } else {
-    // 如果找不到按鈕，提供明確的錯誤訊息
-    statusDiv.innerHTML = '致命錯誤：找不到必要的 DOM 元素 (startButton 或 canvasBuffer)。請確認 index.html 已更新！';
+    statusDiv.innerHTML = '致命錯誤：找不到必要的 DOM 元素。請確認 index.html 已更新！';
     console.error("DIAG ERROR: Missing critical DOM elements. Check index.html.");
 }
 
+// 重設並重新啟動相機 (用於重新拍攝)
+function resetAndStartCamera() {
+    snapshotContainer.style.display = 'none'; // 隱藏結果
+    canvasOutput.style.display = 'block';     // 顯示預覽
+    startButton.style.display = 'block';      // 顯示開始按鈕
+    statusDiv.innerHTML = '點擊「開始」重新拍攝。';
+}
 
 // 2. 啟動相機並設定串流
 function startCamera() {
-    startButton.disabled = true; // 避免重複點擊
+    startButton.style.display = 'none'; // 隱藏開始按鈕
+    canvasOutput.style.display = 'block'; // 確保 Canvas 預覽顯示
     statusDiv.innerHTML = '正在請求相機權限...';
     
     navigator.mediaDevices.getUserMedia({
@@ -73,36 +99,31 @@ function startCamera() {
         video.addEventListener('loadeddata', function initializeVideoAndStartLoop() {
             video.removeEventListener('loadeddata', initializeVideoAndStartLoop);
 
-            // 確保尺寸正確
             console.log(`DIAG: loadeddata 事件觸發。串流解析度: ${video.videoWidth}x${video.videoHeight}`);
 
             if (video.videoWidth === 0 || video.videoHeight === 0) {
                  const errMsg = '致命錯誤：串流尺寸為 0x0。請重新整理或檢查相機資源是否被佔用。';
                  statusDiv.innerHTML = errMsg;
-                 startButton.disabled = false; 
+                 startButton.style.display = 'block'; // 顯示開始按鈕讓用戶重試
                  return;
             }
 
-            // 設定 Canvas 緩衝區和輸出 Canvas 的像素解析度
             canvasOutput.width = canvasBuffer.width = video.videoWidth;
             canvasOutput.height = canvasBuffer.height = video.videoHeight;
             
-            // 取得緩衝區的 2D Context
             canvasBufferCtx = canvasBuffer.getContext('2d');
             
-            // 嘗試播放 video
             video.play().then(() => {
                 statusDiv.innerHTML = '影像串流啟動成功，開始處理...';
                 console.log("DIAG: video.play() 成功。準備進入處理迴圈...");
                 
-                // 開始處理迴圈
                 streaming = true;
                 processVideo(); 
                 
             }).catch(e => {
                 const errMsg = `錯誤：影像播放失敗。請檢查錯誤碼: ${e.message || e.name}`;
                 statusDiv.innerHTML = errMsg;
-                startButton.disabled = false; 
+                startButton.style.display = 'block'; // 顯示開始按鈕讓用戶重試
             });
         });
     })
@@ -110,7 +131,7 @@ function startCamera() {
         const errMsg = `錯誤：無法存取相機。請檢查權限是否被拒絕。(Error: ${err.name} - ${err.message})`;
         statusDiv.innerHTML = errMsg;
         console.error("DIAG ERROR: 無法存取相機:", err);
-        startButton.disabled = false; 
+        startButton.style.display = 'block'; // 顯示開始按鈕讓用戶重試
     });
 }
 
@@ -118,7 +139,6 @@ function startCamera() {
 function processVideo() {
     if (!streaming) return;
 
-    // *** 核心修正：釋放前一幀的記憶體，確保 Mat 尺寸與 Canvas 尺寸同步 ***
     if (src && !src.isDeleted()) {
         src.delete(); 
     }
@@ -126,17 +146,10 @@ function processVideo() {
         dst.delete();
     }
     
-    // 1. 將 video 的當前幀繪製到隱藏的緩衝區 Canvas 上
     canvasBufferCtx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight);
-    
-    // 2. 從緩衝區 Canvas 讀取影像到 OpenCV Mat (src)，這會創建一個新的 Mat
     src = cv.imread(canvasBuffer);
-
-    // 進行影像處理
-    // 3. 複製 src 到 dst (dst 是新的 Mat)
     dst = src.clone(); 
 
-    // 進行名片邊緣偵測
     let cardContour = detectCardBoundary(src); 
 
     if (cardContour) {
@@ -144,7 +157,6 @@ function processVideo() {
 
         if (isCardStableAndClear(cardContour)) {
              statusDiv.innerHTML = '名片已鎖定！準備自動拍攝...';
-             // *** 啟用自動拍攝功能 ***
              takeSnapshot(src, cardContour); 
         } else {
              statusDiv.innerHTML = '偵測到物體，但仍在調整對焦與角度。';
@@ -154,10 +166,8 @@ function processVideo() {
         statusDiv.innerHTML = '請將名片置於畫面中央。';
     }
     
-    // 輸出處理後的影像到 canvasOutput
     cv.imshow('canvasOutput', dst); 
     
-    // 請求下一幀畫面
     requestAnimationFrame(processVideo); 
 }
 
@@ -186,15 +196,13 @@ function detectCardBoundary(inputMat) {
             let contour = contours.get(i);
             let area = cv.contourArea(contour);
 
-            if (area < 1000) continue; // 忽略太小的輪廓
+            if (area < 1000) continue; 
 
             let arcLength = cv.arcLength(contour, true);
             let approx = new cv.Mat();
             
-            // 逼近為多邊形 (尋找四邊形)
             cv.approxPolyDP(contour, approx, 0.02 * arcLength, true);
 
-            // 篩選出四個頂點且面積最大的輪廓
             if (approx.rows === 4 && area > maxArea) {
                 maxArea = area;
                 if (largestContour) largestContour.delete();
@@ -208,10 +216,8 @@ function detectCardBoundary(inputMat) {
         return largestContour;
 
     } catch (e) {
-        // console.error("CV Detection Error:", e); 
         return null;
     } finally {
-        // 釋放記憶體
         gray.delete();
         blur.delete();
         canny.delete();
@@ -227,7 +233,7 @@ function isCardStableAndClear(contour) {
     let area = cv.contourArea(contour);
     let totalArea = src.cols * src.rows; 
     
-    // 條件 1: 放寬面積檢查 (5% 到 85%)，以適應手機不同距離
+    // 條件 1: 面積檢查 (5% 到 85%)
     if (area < totalArea * 0.05 || area > totalArea * 0.85) { 
         return false;
     }
@@ -238,18 +244,16 @@ function isCardStableAndClear(contour) {
         return false;
     }
     
-    // 條件 3: 長寬比檢查 (名片是長方形)
+    // 條件 3: 長寬比檢查
     let rect = cv.minAreaRect(contour);
     let size = rect.size;
     let width = size.width;
     let height = size.height;
 
-    // 確保 width 是較長的邊
     if (width < height) {
         [width, height] = [height, width];
     }
     
-    // 標準名片長寬比約為 1.6~1.7。我們檢查寬鬆範圍 (1.3 到 2.5)
     let aspectRatio = width / height;
     if (aspectRatio < 1.3 || aspectRatio > 2.5) { 
         return false;
@@ -263,10 +267,8 @@ function drawContour(outputMat, contour) {
     let contours = new cv.MatVector();
     contours.push_back(contour);
 
-    // 繪製綠色邊框
     cv.drawContours(outputMat, contours, 0, greenColor, 5, cv.LINE_8);
     
-    // 繪製四個頂點的綠色圓圈
     let points = contour.data32S;
     for (let i = 0; i < points.length; i += 2) {
         let center = new cv.Point(points[i], points[i+1]);
@@ -276,10 +278,69 @@ function drawContour(outputMat, contour) {
     contours.delete();
 }
 
-// 拍照功能 (尚未實作透視變換)
+// 拍照功能 (實現透視變換和圖片導出)
 function takeSnapshot(sourceMat, contour) {
     // 停止串流
     streaming = false;
-    statusDiv.innerHTML = '拍攝成功！(功能待實作: 圖片導出)';
-    console.log("快照已拍攝，等待透視變換與下載。");
+    statusDiv.innerHTML = '處理中，請稍候...';
+
+    // 1. 取得名片四個頂點 (左上、右上、右下、左下)
+    let approxPoints = [];
+    for (let i = 0; i < contour.rows; ++i) {
+        approxPoints.push(new cv.Point(contour.data32S[i * 2], contour.data32S[i * 2 + 1]));
+    }
+    // 根據X,Y座標排序，確保順序為左上、右上、右下、左下 (OpenCV需要)
+    approxPoints.sort((a, b) => a.y - b.y);
+    let topLeft = approxPoints[0].x < approxPoints[1].x ? approxPoints[0] : approxPoints[1];
+    let topRight = approxPoints[0].x > approxPoints[1].x ? approxPoints[0] : approxPoints[1];
+    let bottomRight = approxPoints[2].x > approxPoints[3].x ? approxPoints[2] : approxPoints[3];
+    let bottomLeft = approxPoints[2].x < approxPoints[3].x ? approxPoints[2] : approxPoints[3];
+
+    // 2. 準備透視變換的來源和目標點
+    let srcTri = cv.matFromArray(4, 1, cv.CV_32FC2, [
+        topLeft.x, topLeft.y,
+        topRight.x, topRight.y,
+        bottomRight.x, bottomRight.y,
+        bottomLeft.x, bottomLeft.y
+    ]);
+
+    // 計算名片校正後的大小 (基於原始輪廓的長寬)
+    let width = Math.sqrt(Math.pow(topRight.x - topLeft.x, 2) + Math.pow(topRight.y - topLeft.y, 2));
+    let height = Math.sqrt(Math.pow(bottomLeft.x - topLeft.x, 2) + Math.pow(bottomLeft.y - topLeft.y, 2));
+
+    // 目標矩形點 (校正後的影像會變成這個大小)
+    let dstTri = cv.matFromArray(4, 1, cv.CV_32FC2, [
+        0, 0,
+        width, 0,
+        width, height,
+        0, height
+    ]);
+
+    // 3. 執行透視變換
+    let M = cv.getPerspectiveTransform(srcTri, dstTri);
+    let dsize = new cv.Size(width, height);
+    let correctedCard = new cv.Mat();
+    cv.warpPerspective(sourceMat, correctedCard, M, dsize, cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar());
+
+    // 4. 將校正後的圖片顯示到 img 標籤
+    cv.imshow(snapshotImage, correctedCard);
+
+    // 釋放記憶體
+    srcTri.delete();
+    dstTri.delete();
+    M.delete();
+    correctedCard.delete();
+
+    // 隱藏預覽 Canvas，顯示結果
+    canvasOutput.style.display = 'none';
+    snapshotContainer.style.display = 'block';
+
+    statusDiv.innerHTML = '拍攝完成，已自動校正。';
+    console.log("快照已拍攝，透視變換完成並顯示。");
+
+    // 停止相機串流 (真正停止硬體)
+    if (video.srcObject) {
+        video.srcObject.getTracks().forEach(track => track.stop());
+        video.srcObject = null;
+    }
 }
