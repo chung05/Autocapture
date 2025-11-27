@@ -4,6 +4,26 @@
  *
  * 修正：將相機啟動邏輯移至按鈕點擊事件 (startButton)。
  */
+// ** 核心修正：定義全域 Module 物件，以避免 ReferenceError **
+var Module = {
+    // 1. *** 核心修正: 使用 OpenCV 標準的初始化回呼函式 ***
+    // 當 WebAssembly runtime 準備就緒後，會自動呼叫此函式
+    onRuntimeInitialized: function() {
+        // 關鍵修正點：在這裡初始化所有依賴 cv 物件的變數，確保 cv 已載入
+        greenColor = new cv.Scalar(0, 255, 0, 255); // 綠色 (用於繪製邊框)
+        
+        statusDiv.innerHTML = 'OpenCV 載入完成。請點擊「開始」按鈕。';
+        console.log("DIAG: Module.onRuntimeInitialized 成功，OpenCV 核心已準備就緒。");
+        
+        // 將相機啟動邏輯綁定到按鈕點擊事件
+        if (startButton) {
+            startButton.addEventListener('click', startCamera);
+            startButton.disabled = false; // 載入完成後啟用按鈕
+            startButton.innerHTML = '點擊開始';
+        }
+    }
+};
+
 const video = document.getElementById('video');
 const canvasOutput = document.getElementById('canvasOutput');
 const statusDiv = document.getElementById('status');
@@ -25,23 +45,6 @@ if (startButton) {
     console.error("DIAG ERROR: startButton element not found. Check index.html.");
 }
 
-
-// 1. *** 核心修正: 使用 OpenCV 標準的初始化回呼函式 ***
-// 當 WebAssembly runtime 準備就緒後，會自動呼叫此函式
-Module.onRuntimeInitialized = function() {
-    // 關鍵修正點：在這裡初始化所有依賴 cv 物件的變數，確保 cv 已載入
-    greenColor = new cv.Scalar(0, 255, 0, 255); // 綠色 (用於繪製邊框)
-    
-    statusDiv.innerHTML = 'OpenCV 載入完成。請點擊「開始」按鈕。';
-    console.log("DIAG: Module.onRuntimeInitialized 成功，OpenCV 核心已準備就緒。");
-    
-    // 將相機啟動邏輯綁定到按鈕點擊事件
-    if (startButton) {
-        startButton.addEventListener('click', startCamera);
-        startButton.disabled = false; // 載入完成後啟用按鈕
-        startButton.innerHTML = '點擊開始';
-    }
-};
 
 // 2. 啟動相機並設定串流
 function startCamera() {
