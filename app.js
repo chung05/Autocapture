@@ -15,6 +15,7 @@ let greenColor = new cv.Scalar(0, 255, 0, 255); // 綠色 (用於繪製邊框)
 // 當 WebAssembly runtime 準備就緒後，會自動呼叫此函式
 Module.onRuntimeInitialized = function() {
     statusDiv.innerHTML = 'OpenCV 載入完成，正在啟動相機...';
+    console.log("DIAG: Module.onRuntimeInitialized 成功，開始啟動相機。");
     startCamera();
 };
 
@@ -29,9 +30,20 @@ function startCamera() {
     .then(stream => {
         video.srcObject = stream;
         
+        console.log("DIAG: getUserMedia 成功取得串流。等待 loadeddata 事件...");
+        
         // 使用 'loadeddata' 事件，確保影像串流的資料已開始緩衝
         video.addEventListener('loadeddata', function initializeVideoAndStartLoop() {
             video.removeEventListener('loadeddata', initializeVideoAndStartLoop);
+
+            // *** 關鍵診斷點 ***：確認影像尺寸是否正確讀取。若為 0x0，則串流未準備好。
+            console.log(`DIAG: loadeddata 事件觸發。串流解析度: ${video.videoWidth}x${video.videoHeight}`);
+
+            if (video.videoWidth === 0 || video.videoHeight === 0) {
+                 statusDiv.innerHTML = '致命錯誤：串流尺寸為 0x0。請重新整理或檢查相機資源是否被佔用。';
+                 console.error("DIAG ERROR: Video stream reports 0x0 dimensions after loadeddata.");
+                 return;
+            }
 
             // 設定 canvas 像素解析度與 video 串流相同
             canvasOutput.width = video.videoWidth;
@@ -44,6 +56,7 @@ function startCamera() {
             // 嘗試播放 video
             video.play().then(() => {
                 statusDiv.innerHTML = '影像串流緩衝中...';
+                console.log("DIAG: video.play() 成功。準備進入處理迴圈...");
                 
                 // 增加 200ms 延遲，確保影像串流穩定，再開始處理迴圈
                 setTimeout(() => {
@@ -55,14 +68,14 @@ function startCamera() {
             }).catch(e => {
                 const errMsg = `錯誤：影像播放失敗。請檢查錯誤碼: ${e.message || e.name}`;
                 statusDiv.innerHTML = errMsg;
-                console.error("Video play failed:", e);
+                console.error("DIAG ERROR: Video play failed:", e);
             });
         });
     })
     .catch(err => {
         const errMsg = `錯誤：無法存取相機。請檢查權限是否被拒絕。(Error: ${err.name} - ${err.message})`;
         statusDiv.innerHTML = errMsg;
-        console.error("無法存取相機:", err);
+        console.error("DIAG ERROR: 無法存取相機:", err);
     });
 }
 
@@ -150,6 +163,7 @@ function detectCardBoundary(inputMat) {
         return largestContour;
 
     } catch (e) {
+        // console.error("CV Detection Error:", e); // 在生產環境中可以註解掉，避免過多日誌
         return null;
     } finally {
         // 釋放記憶體
