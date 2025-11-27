@@ -10,24 +10,24 @@
 
     <h1>名片自動拍攝</h1>
     
-    <!-- 開始按鈕：預設為禁用，直到 OpenCV 載入完成才啟用 -->
     <button id="startButton" disabled>點擊開始 (載入中...)</button>
     
-    <!-- 顯示相機串流的區域，必須要有 playsinline/muted 支援行動裝置 -->
     <video id="video" playsinline muted autoplay></video>
-    
-    <!-- 隱藏的緩衝區 Canvas，用於將影片幀傳遞給 OpenCV.js -->
     <canvas id="canvasBuffer"></canvas>
 
-    <!-- 即時顯示處理結果和邊框的區域 -->
     <canvas id="canvasOutput"></canvas>
 
     <div id="status">正在載入 OpenCV.js... 請稍候。</div>
 
-    <!-- 載入我們的主要邏輯檔案 (定義 Module) -->
-    <script src="app.js"></script>
+    <!-- 新增拍攝結果顯示區域 --><div id="snapshotContainer" style="display: none; margin-top: 20px;">
+        <h2>拍攝結果</h2>
+        <img id="snapshotImage" style="max-width: 90vw; height: auto; border: 3px solid #333; border-radius: 8px;">
+        <br>
+        <button id="downloadSnapshot" style="margin-top: 10px; padding: 10px 20px; font-size: 1.1em; background-color: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer;">下載圖片</button>
+        <button id="retakeButton" style="margin-top: 10px; margin-left: 10px; padding: 10px 20px; font-size: 1.1em; background-color: #ffc107; color: #333; border: none; border-radius: 5px; cursor: pointer;">重新拍攝</button>
+    </div>
 
-    <!-- 載入 OpenCV.js 函式庫 (必須在 app.js 之後載入) -->
+    <script src="app.js"></script>
     <script src="https://docs.opencv.org/4.9.0/opencv.js"></script>
 </body>
 </html>
