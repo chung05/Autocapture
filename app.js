@@ -1,11 +1,11 @@
 /**
  * 名片掃描應用程式的主邏輯 (app.js) - 最終穩定版
- * 最終修正與強化：
- * 1. 【核心修正】強化穩定性機制：新增幾何穩定性檢查，確保名片在拍攝前，其位置、大小和形狀必須連續穩定。
- * 2. 魯棒性增強：在 takeSnapshot 中加入 try...catch 區塊，防止 CV 運算錯誤導致應用程式卡在「處理中」。
- * 3. 修正透視變換 (Perspective Transform) 的頂點排序邏輯，確保校正正確。
- * 4. 強化下載圖片邏輯，確保下載的圖片格式正確。
- * 5. 新增視覺回饋：名片鎖定後，邊框顏色會動態變化，指示穩定度進度。
+ * 修正重點：
+ * 1. 【核心修正】將相機串流停止邏輯移至 takeSnapshot 函式開頭，確保資源優先釋放，防止 CV 運算失敗時卡住。
+ * 2. 強化穩定性機制：新增幾何穩定性檢查，確保名片在拍攝前，其位置、大小和形狀必須連續穩定。
+ * 3. 魯棒性增強：在 takeSnapshot 中加入 try...catch 區塊，防止 CV 運算錯誤導致應用程式卡在「處理中」。
+ * 4. 修正透視變換 (Perspective Transform) 的頂點排序邏輯，確保校正正確。
+ * 5. 強化下載圖片邏輯，確保下載的圖片格式正確。
  */
 
 // 宣告全域變數
@@ -392,10 +392,14 @@ function drawContour(outputMat, contour, color, thickness) {
 
 // 拍照功能 (修正頂點排序邏輯，確保透視變換正確, 並加入錯誤處理)
 function takeSnapshot(sourceMat, contour) {
-    // 停止串流
+    // 1. 【關鍵修正】立即停止串流並更新狀態 (確保資源釋放)
     streaming = false;
     statusDiv.innerHTML = '處理中，請稍候...';
-    
+    if (video.srcObject) {
+        video.srcObject.getTracks().forEach(track => track.stop());
+        video.srcObject = null;
+    }
+
     // 宣告可能需要在 finally 或 catch 中釋放的 Mat 物件
     let srcTri = null;
     let dstTri = null;
@@ -475,23 +479,13 @@ function takeSnapshot(sourceMat, contour) {
         snapshotContainer.style.display = 'block';
 
         statusDiv.innerHTML = '拍攝完成，已自動校正。';
-        console.log("快照已拍攝，透視變換完成並顯示。");
+        console.log("DIAG: 快照已拍攝，透視變換完成並顯示。");
 
-        // 停止相機串流 (真正停止硬體)
-        if (video.srcObject) {
-            video.srcObject.getTracks().forEach(track => track.stop());
-            video.srcObject = null;
-        }
 
     } catch (error) {
         // 處理 CV 邏輯中的任何錯誤 (避免停在「處理中」)
+        console.log("DIAG: CATCH BLOCK REACHED."); // 確保有日誌
         console.error("DIAG ERROR: 拍照處理失敗，正在重設：", error);
-        
-        // 確保相機串流被停止
-        if (video.srcObject) {
-            video.srcObject.getTracks().forEach(track => track.stop());
-            video.srcObject = null;
-        }
         
         // 顯示錯誤訊息並讓使用者重試
         statusDiv.innerHTML = `錯誤：名片處理失敗 (原因：${error.message})。請重試並確認名片邊緣清晰。`;
