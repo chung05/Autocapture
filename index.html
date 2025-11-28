@@ -8,7 +8,11 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- 引入 獨立的 CSS 文件 -->
     <link rel="stylesheet" href="style.css">
-    <!-- 引入 OpenCV.js -->
+    
+    <!-- 關鍵修正：先載入 app.js，確保 Module 物件定義完成 -->
+    <script src="app.js"></script>
+    
+    <!-- 後載入 OpenCV.js，它會找到 app.js 中定義的 Module.onRuntimeInitialized -->
     <script async src="https://docs.opencv.org/4.x/opencv.js"></script>
 </head>
 <body class="bg-gray-900 text-white font-sans flex items-center justify-center p-4">
@@ -53,8 +57,5 @@
         <!-- 緩衝 Canvas (預設隱藏) -->
         <canvas id="canvasBuffer" style="display: none;"></canvas>
     </div>
-
-    <!-- 載入 app.js 腳本 -->
-    <script src="app.js"></script>
 </body>
 </html>
