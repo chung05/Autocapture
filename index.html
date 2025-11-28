@@ -45,6 +45,9 @@
     <!-- 新增 onerror 處理，以捕捉腳本無法下載的錯誤 -->
     <script async src="https://docs.opencv.org/4.x/opencv.js" onerror="document.getElementById('status').innerHTML = '錯誤：OpenCV 腳本載入失敗（網路或資源錯誤）。'; console.error('DIAG ERROR: OpenCV.js Script Loading Failed.')"></script>
     
+    <!-- 修正時序問題：確保 app.js（包含 initAppWithOpenCV 函式）在 OpenCV 呼叫其 onRuntimeInitialized 之前完全載入 -->
+    <script src="app.js"></script> 
+    
 </head>
 <body class="bg-gray-900 text-white font-sans flex items-center justify-center p-4">
     <!-- main-container 使用了 style.css 中的樣式來適應手機高度 -->
@@ -89,7 +92,6 @@
         <canvas id="canvasBuffer" style="display: none;"></canvas>
     </div>
     
-    <!-- 將 app.js 移回 body 底部，確保所有 DOM 元素已載入 -->
-    <script src="app.js"></script>
+    <!-- 原始 app.js 載入標籤已移除 -->
 </body>
 </html>
