@@ -1,11 +1,8 @@
 /**
  * 名片掃描應用程式的主邏輯 (app.js) - 最終穩定版
  * 修正重點：
- * 1. 【核心修正】在 startCamera 中加入更嚴謹的錯誤處理和日誌記錄，診斷啟動失敗問題。
- * 2. 【核心修正】確保 canvasOutput 和 canvasBuffer 的尺寸與實際的 video 串流尺寸完全一致，以正確處理畫面的長寬比（例如手機上的直向模式），解決啟動無影像問題。
- * 3. 請求高解析度並啟用連續自動對焦，確保影像清晰度。
- * 4. 魯棒性增強：在 processVideo 和 takeSnapshot 中加入 try...catch 區塊。
- * 5. 【載入診斷】新增超時檢查，明確診斷 OpenCV 核心載入失敗或超時。
+ * 1. 【核心修正】移除冗餘的 Module 定義，改為由 index.html 中的同步腳本定義。
+ * 2. 【核心修正】將所有 DOM 查詢和初始化邏輯包裝在 initAppWithOpenCV 函式中，確保在 OpenCV 核心載入完成後 (即 onRuntimeInitialized 被呼叫時) 執行。
  */
 
 // 宣告全域變數
@@ -25,91 +22,76 @@ const MOVEMENT_THRESHOLD = 15; // 允許的最大中心點移動距離 (像素)
 const AREA_CHANGE_THRESHOLD = 0.1; // 允許的最大面積變化比例 (10%)
 
 
-// 新增 DOM 元素參照
+// 宣告 DOM 元素參照 (將在 initAppWithOpenCV 內賦值)
+let video = null;
+let canvasOutput = null;
+let statusDiv = null;
+let startButton = null; 
 let snapshotContainer = null;
 let snapshotImage = null;
 let downloadSnapshot = null;
 let retakeButton = null;
 
-// 取得 DOM 元素參照
-const video = document.getElementById('video');
-const canvasOutput = document.getElementById('canvasOutput');
-const statusDiv = document.getElementById('status');
-const startButton = document.getElementById('startButton'); 
-canvasBuffer = document.getElementById('canvasBuffer');
 
-// 新增 DOM 元素參照
-snapshotContainer = document.getElementById('snapshotContainer');
-snapshotImage = document.getElementById('snapshotImage');
-downloadSnapshot = document.getElementById('downloadSnapshot');
-retakeButton = document.getElementById('retakeButton');
-
-let opencvLoadTimeout; // 載入超時檢查器
-
-// ** 核心修正：定義全域 Module 物件，以避免 ReferenceError **
-var Module = {
-    onRuntimeInitialized: function() {
-        clearTimeout(opencvLoadTimeout); // 成功載入，清除超時
-        statusDiv.innerHTML = 'OpenCV 載入完成。請點擊「開始」按鈕。';
-        console.log("DIAG: Module.onRuntimeInitialized 成功，OpenCV 核心已準備就緒。");
-        
-        if (startButton) {
-            startButton.addEventListener('click', startCamera);
-            startButton.disabled = false;
-            startButton.innerHTML = '點擊開始';
-        }
-
-        // 初始化拍照結果顯示區域的事件監聽器 (強化下載邏輯)
-        if (downloadSnapshot) {
-            downloadSnapshot.addEventListener('click', () => {
-                const img = document.getElementById('snapshotImage');
-                const tempCanvas = document.createElement('canvas');
-                
-                // 嘗試從 img 標籤獲取實際尺寸
-                tempCanvas.width = img.naturalWidth || 1280;
-                tempCanvas.height = img.naturalHeight || 720;
-                const tempCtx = tempCanvas.getContext('2d');
-                
-                if (!img.src || img.naturalWidth === 0) {
-                    statusDiv.innerHTML = '無法下載：圖片數據不存在。請重新拍攝。';
-                    console.error('無法下載：圖片數據不存在。');
-                    return;
-                }
-                
-                tempCtx.drawImage(img, 0, 0, tempCanvas.width, tempCanvas.height);
-
-                const a = document.createElement('a');
-                a.href = tempCanvas.toDataURL('image/png');
-                a.download = 'business_card_corrected.png';
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-            });
-        }
-        if (retakeButton) {
-            retakeButton.addEventListener('click', resetAndStartCamera);
-        }
-    }
-};
-
-
-// ** 新增 DOM 檢查和初始狀態設定 **
-if (startButton && canvasBuffer && snapshotContainer && snapshotImage && downloadSnapshot && retakeButton) {
-    startButton.innerHTML = 'OpenCV 載入中...';
-    startButton.disabled = true; 
-
-    // 【載入診斷】設定超時檢查 (15 秒)
-    opencvLoadTimeout = setTimeout(() => {
-        if (startButton.innerHTML === 'OpenCV 載入中...') {
-            statusDiv.innerHTML = '錯誤：OpenCV 載入超時 (15 秒)。請檢查網路連線或嘗試重新整理。';
-            console.error("DIAG ERROR: OpenCV.js 載入超時。可能因為網路問題。");
-        }
-    }, 15000); // 15 秒超時
+// ** 核心初始化函式：在 OpenCV 核心載入完成後被呼叫 **
+// 函式名稱必須與 index.html 中的 inline script 呼叫一致
+function initAppWithOpenCV() {
     
-} else {
-    statusDiv.innerHTML = '致命錯誤：找不到必要的 DOM 元素。請確認 index.html 已更新！';
-    console.error("DIAG ERROR: Missing critical DOM elements. Check index.html.");
+    // 取得 DOM 元素參照 (此時 DOM 元素已完全載入)
+    video = document.getElementById('video');
+    canvasOutput = document.getElementById('canvasOutput');
+    statusDiv = document.getElementById('status');
+    startButton = document.getElementById('startButton'); 
+    canvasBuffer = document.getElementById('canvasBuffer');
+    snapshotContainer = document.getElementById('snapshotContainer');
+    snapshotImage = document.getElementById('snapshotImage');
+    downloadSnapshot = document.getElementById('downloadSnapshot');
+    retakeButton = document.getElementById('retakeButton');
+    
+    // 檢查是否所有必要的 DOM 元素都已找到
+    if (!startButton || !canvasBuffer || !snapshotContainer || !snapshotImage || !downloadSnapshot || !retakeButton || !statusDiv) {
+        statusDiv.innerHTML = '致命錯誤：找不到必要的 DOM 元素。應用程式無法啟動。';
+        console.error("DIAG ERROR: Missing critical DOM elements after OpenCV initialized.");
+        return;
+    }
+    
+    // 更新狀態和按鈕
+    statusDiv.innerHTML = 'OpenCV 載入完成。請點擊「開始」按鈕。';
+    console.log("DIAG: initAppWithOpenCV 成功執行，OpenCV 核心已準備就緒。");
+    
+    startButton.addEventListener('click', startCamera);
+    startButton.disabled = false;
+    startButton.innerHTML = '點擊開始';
+
+    // 初始化拍照結果顯示區域的事件監聽器 (強化下載邏輯)
+    downloadSnapshot.addEventListener('click', () => {
+        const img = document.getElementById('snapshotImage');
+        const tempCanvas = document.createElement('canvas');
+        
+        // 嘗試從 img 標籤獲取實際尺寸
+        tempCanvas.width = img.naturalWidth || 1280;
+        tempCanvas.height = img.naturalHeight || 720;
+        const tempCtx = tempCanvas.getContext('2d');
+        
+        if (!img.src || img.naturalWidth === 0) {
+            statusDiv.innerHTML = '無法下載：圖片數據不存在。請重新拍攝。';
+            console.error('無法下載：圖片數據不存在。');
+            return;
+        }
+        
+        tempCtx.drawImage(img, 0, 0, tempCanvas.width, tempCanvas.height);
+
+        const a = document.createElement('a');
+        a.href = tempCanvas.toDataURL('image/png');
+        a.download = 'business_card_corrected.png';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+    });
+    
+    retakeButton.addEventListener('click', resetAndStartCamera);
 }
+
 
 // 重設並重新啟動相機 (用於重新拍攝)
 function resetAndStartCamera() {
