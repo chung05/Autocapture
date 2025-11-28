@@ -30,19 +30,20 @@
             }
         };
         
-        // 【載入診斷】設定超時檢查 (15 秒)
+        // 【載入診斷】設定超時檢查 (10 秒) - 如果在 10 秒內沒有呼叫 onRuntimeInitialized，則顯示錯誤
         opencvLoadTimeout = setTimeout(() => {
              var statusDiv = document.getElementById('status');
              if (statusDiv && statusDiv.innerHTML === 'OpenCV 載入中...') {
-                statusDiv.innerHTML = '錯誤：OpenCV 載入超時 (15 秒)。請檢查網路連線或嘗試重新整理。';
+                statusDiv.innerHTML = '錯誤：OpenCV 載入超時 (10 秒)。請檢查網路連線或嘗試重新整理。';
                 console.error("DIAG ERROR: OpenCV.js 載入超時。可能因為網路問題。");
             }
-        }, 15000); // 15 秒超時
+        }, 10000); // 10 秒超時
         
     </script>
     
     <!-- 後載入 OpenCV.js，它會找到上方同步定義的 Module -->
-    <script async src="https://docs.opencv.org/4.x/opencv.js"></script>
+    <!-- 新增 onerror 處理，以捕捉腳本無法下載的錯誤 -->
+    <script async src="https://docs.opencv.org/4.x/opencv.js" onerror="document.getElementById('status').innerHTML = '錯誤：OpenCV 腳本載入失敗（網路或資源錯誤）。'; console.error('DIAG ERROR: OpenCV.js Script Loading Failed.')"></script>
     
 </head>
 <body class="bg-gray-900 text-white font-sans flex items-center justify-center p-4">
