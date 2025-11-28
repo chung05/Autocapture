@@ -4,65 +4,35 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI 名片掃描器</title>
-    <!-- 引入 Tailwind CSS -->
+    <!-- 引入 Tailwind CSS (用於快速樣式設置) -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入 獨立的 CSS 文件 -->
+    <link rel="stylesheet" href="style.css">
     <!-- 引入 OpenCV.js -->
     <script async src="https://docs.opencv.org/4.x/opencv.js"></script>
-    <style>
-        /* 確保 video 和 canvas 100% 寬度並保持長寬比，隱藏 video 標籤 */
-        #video {
-            display: none;
-        }
-        #canvasOutput {
-            width: 100%;
-            height: auto;
-            object-fit: contain; /* 確保內容完整顯示 */
-            border-radius: 0.5rem;
-        }
-        /* 結果顯示容器 - 確保圖片填滿，並讓用戶體驗到「全頁顯示」 */
-        #snapshotContainer {
-            display: none;
-            width: 100%;
-            height: 100%;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            padding: 1rem;
-            background-color: #0d121c; /* 與主要背景一致 */
-        }
-        #snapshotImage {
-            max-width: 100%;
-            max-height: 80vh; /* 限制高度以顯示按鈕 */
-            height: auto;
-            border: 2px solid #3b82f6;
-            border-radius: 0.75rem;
-            box-shadow: 0 10px 15px rgba(0, 0, 0, 0.5);
-            object-fit: contain;
-        }
-    </style>
 </head>
-<body class="bg-gray-900 text-white min-h-screen font-sans flex items-center justify-center p-4">
-    <div class="w-full max-w-xl bg-gray-800 p-6 rounded-xl shadow-2xl space-y-4">
+<body class="bg-gray-900 text-white font-sans flex items-center justify-center p-4">
+    <!-- main-container 使用了 style.css 中的樣式來適應手機高度 -->
+    <div class="main-container bg-gray-800 p-6 rounded-xl shadow-2xl space-y-4">
         <h1 class="text-3xl font-bold text-center text-blue-400">名片掃描與校正</h1>
         
         <!-- 狀態顯示區域 -->
-        <div id="status" class="text-center text-sm p-2 bg-gray-700 rounded-lg text-gray-300">
+        <div id="status" class="text-center text-sm p-2 bg-gray-700 rounded-lg text-gray-300 flex-shrink-0">
             OpenCV 載入中...
         </div>
 
         <!-- 影像顯示區域 -->
-        <div class="relative flex justify-center items-center w-full aspect-video bg-gray-900 rounded-xl overflow-hidden shadow-inner">
+        <div class="relative flex-grow flex justify-center items-center w-full bg-gray-900 rounded-xl overflow-hidden shadow-inner min-h-[300px]">
             <!-- 實際的影片串流，用於擷取畫面但隱藏 -->
             <video id="video" playsinline autoplay muted></video>
             
             <!-- 預覽/處理中的 Canvas -->
-            <canvas id="canvasOutput" class="w-full h-full object-contain"></canvas>
+            <canvas id="canvasOutput"></canvas>
             
             <!-- 處理結果圖片顯示區域 (預設隱藏) -->
-            <div id="snapshotContainer" class="absolute inset-0 bg-gray-900">
+            <div id="snapshotContainer">
                 <img id="snapshotImage" alt="校正後的名片圖片" class="mb-4">
-                <div class="flex space-x-4 mt-2">
+                <div class="flex space-x-4 mt-2 flex-shrink-0">
                     <button id="downloadSnapshot" class="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2 px-4 rounded-lg shadow-lg transition duration-150">
                         下載圖片
                     </button>
@@ -73,8 +43,8 @@
             </div>
         </div>
         
-        <!-- 開始按鈕 -->
-        <div class="text-center">
+        <!-- 開始按鈕/控制區域 (固定在底部) -->
+        <div class="text-center flex-shrink-0">
             <button id="startButton" class="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold text-lg rounded-xl shadow-xl disabled:opacity-50 transition duration-150" disabled>
                 OpenCV 載入中...
             </button>
