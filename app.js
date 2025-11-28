@@ -8,6 +8,9 @@
  * 5. 強化下載圖片邏輯，確保下載的圖片格式正確。
  * 6. 【本次修正】新增 processVideo 全域 try...catch，防止 CV 崩潰導致無偵測框線。
  * 7. 【本次修正】強化 resetAndStartCamera 函式，確保相機軌道被強制關閉。
+ * 8. 【本次修正】在 startCamera 中強制請求高解析度和連續自動對焦，解決模糊問題。
+ * 9. 【本次修正】在 detectCardBoundary 中放寬 Canny 門檻和最小面積，提高偵測靈敏度。
+ * 10. 【本次修正】在 resetAndStartCamera 中增加 Mat 物件清理，避免重啟錯誤。
  */
 
 // 宣告全域變數
@@ -37,7 +40,6 @@ let retakeButton = null;
 // ** 核心修正：定義全域 Module 物件，以避免 ReferenceError **
 var Module = {
     onRuntimeInitialized: function() {
-        // greenColor = new cv.Scalar(0, 255, 0, 255); // 移除固定顏色定義
         
         statusDiv.innerHTML = 'OpenCV 載入完成。請點擊「開始」按鈕。';
         console.log("DIAG: Module.onRuntimeInitialized 成功，OpenCV 核心已準備就緒。");
@@ -114,6 +116,17 @@ function resetAndStartCamera() {
         video.srcObject = null;
         console.log("DIAG: resetAndStartCamera - 成功停止相機軌道。");
     }
+    
+    // 【本次修正】顯式清理 Mat 物件
+    if (src && !src.isDeleted()) {
+        src.delete(); 
+        src = null;
+    }
+    if (dst && !dst.isDeleted()) {
+        dst.delete();
+        dst = null;
+    }
+
     streaming = false; // 確保處理迴圈停止
 
     snapshotContainer.style.display = 'none'; // 隱藏結果
@@ -130,13 +143,13 @@ function startCamera() {
     canvasOutput.style.display = 'block'; // 確保 Canvas 預覽顯示
     statusDiv.innerHTML = '正在請求相機權限...';
     
-    // 在 iOS/Safari 上，需要更精確地請求環境鏡頭
+    // 【本次修正】請求高解析度並啟用連續對焦
     navigator.mediaDevices.getUserMedia({
         video: {
             facingMode: 'environment',
-            // 嘗試添加約束來改善對焦，雖然不保證有效，但值得一試
-            // autoFocus: true, // 僅適用於特定的瀏覽器/環境
-            // focusMode: "continuous" 
+            width: { ideal: 1280 }, // 請求高寬度以提高影像品質
+            height: { ideal: 720 }, // 請求高高度以提高影像品質
+            focusMode: "continuous" // 嘗試強制連續自動對焦 (瀏覽器支援性不一)
         }
     })
     .then(stream => {
@@ -282,7 +295,7 @@ function processVideo() {
                  cardContour.delete();
                  statusDiv.innerHTML = '偵測到輪廓，但形狀或長寬比不符名片要求。';
             } else {
-                 statusDiv.innerHTML = '請將名片置於畫面中央。';
+                 statusDiv.innerHTML = '請將名片置於畫面中央，背景對比度要高。'; // 提示用戶提高對比度
             }
         }
         
@@ -304,7 +317,7 @@ function processVideo() {
 // 4. 電腦視覺函式實作 
 // ----------------------------------------------------------------
 
-// 偵測名片輪廓的 CV 演算法 (無變動)
+// 偵測名片輪廓的 CV 演算法 (放寬門檻)
 function detectCardBoundary(inputMat) {
     let gray = new cv.Mat();
     let blur = new cv.Mat();
@@ -315,7 +328,10 @@ function detectCardBoundary(inputMat) {
     try {
         cv.cvtColor(inputMat, gray, cv.COLOR_RGBA2GRAY, 0); 
         cv.GaussianBlur(gray, blur, new cv.Size(5, 5), 0, 0, cv.BORDER_DEFAULT);
-        cv.Canny(blur, canny, 75, 200, 3, false); 
+        
+        // 【本次修正】放寬 Canny 門檻，提高偵測靈敏度
+        cv.Canny(blur, canny, 50, 150, 3, false); // 75/200 -> 50/150
+        
         cv.findContours(canny, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
         
         let largestContour = null;
@@ -325,8 +341,9 @@ function detectCardBoundary(inputMat) {
             let contour = contours.get(i);
             let area = cv.contourArea(contour);
 
-            if (area < 1000) continue; 
-
+            // 【本次修正】降低最小面積要求
+            if (area < 500) continue; // 1000 -> 500 
+            
             let arcLength = cv.arcLength(contour, true);
             let approx = new cv.Mat();
             
@@ -345,6 +362,7 @@ function detectCardBoundary(inputMat) {
         return largestContour;
 
     } catch (e) {
+        console.error("DIAG ERROR: detectCardBoundary 內部錯誤:", e);
         return null;
     } finally {
         gray.delete();
@@ -494,12 +512,14 @@ function takeSnapshot(sourceMat, contour) {
 
         // 4. 將校正後的圖片顯示到 img 標籤
         cv.imshow(snapshotImage, correctedCard);
-        snapshotImage.style.width = '100%'; // 確保圖片在容器內自適應
-        snapshotImage.style.height = 'auto';
+        
+        // 【本次修正】 HTML/CSS 已經處理了 '整頁模式' 的響應式顯示
+        // snapshotImage.style.width = '100%'; 
+        // snapshotImage.style.height = 'auto'; // 透過 CSS 確保圖片在容器內自適應
 
         // 隱藏預覽 Canvas，顯示結果
         canvasOutput.style.display = 'none';
-        snapshotContainer.style.display = 'block';
+        snapshotContainer.style.display = 'flex'; // 使用 flex 讓內容居中
 
         statusDiv.innerHTML = '拍攝完成，已自動校正。';
         console.log("DIAG: 快照已拍攝，透視變換完成並顯示。");
