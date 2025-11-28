@@ -9,44 +9,56 @@
     <!-- 引入 獨立的 CSS 文件 -->
     <link rel="stylesheet" href="style.css">
     
-    <!-- 核心修正：同步定義 Module 物件，確保 OpenCV 載入時立即找到回呼函式 -->
+    <!-- 全域載入控制腳本 (必須在 head 中先定義) -->
     <script>
-        // 宣告 Module 物件，確保它是全域且立即存在
+        // 1. 定義全局旗標
         var Module = {}; 
-        var opencvLoadTimeout; // 宣告超時檢查器
-        
-        // OpenCV.js 載入完成時會呼叫這個函式
-        Module.onRuntimeInitialized = function() {
-            clearTimeout(opencvLoadTimeout); // 成功載入，清除超時
-            console.log("DIAG: OpenCV 核心載入完成。準備執行 app.js 初始化。");
-            
-            // 由於 app.js 在 body 底部，DOM 元素已經準備好。
-            // 觸發 app.js 內定義的初始化邏輯
-            if (typeof initAppWithOpenCV === 'function') {
-                initAppWithOpenCV();
-            } else {
-                 // 如果 app.js 載入失敗或太慢，這會顯示錯誤
-                 document.getElementById('status').innerHTML = '錯誤：OpenCV 載入成功，但 app.js 初始化函式遺失。';
+        var opencvReady = false; // 旗標 A: OpenCV 是否完成核心初始化
+        var appLoaded = false;   // 旗標 B: app.js 是否載入並定義了所有函式
+
+        // 2. 雙旗標檢查函式 (不論哪個先完成，都呼叫此函式)
+        function checkInitialization() {
+            var statusDiv = document.getElementById('status');
+
+            if (opencvReady && appLoaded) {
+                // 兩者都準備就緒
+                clearTimeout(opencvLoadTimeout); 
+                console.log("DIAG: 雙旗標檢查通過。開始應用程式初始化。");
+                
+                // 呼叫 app.js 中定義的初始化函式
+                if (typeof initAppWithOpenCV === 'function') {
+                    initAppWithOpenCV();
+                } else {
+                    // 這是最後的防線，如果程式碼邏輯有誤，會捕捉到
+                    statusDiv.innerHTML = '致命錯誤：初始化函式遺失。';
+                    console.error("DIAG ERROR: initAppWithOpenCV 仍然未定義。");
+                }
+            } else if (statusDiv && statusDiv.innerHTML === 'OpenCV 載入中...') {
+                // 僅更新狀態，不執行初始化
+                statusDiv.innerHTML = 'OpenCV 載入中...';
             }
+        }
+        
+        // 3. OpenCV 回呼：設定旗標 A
+        Module.onRuntimeInitialized = function() {
+            opencvReady = true;
+            console.log("DIAG: OpenCV 核心初始化完成 (旗標 A 設置)。");
+            checkInitialization();
         };
         
-        // 【載入診斷】設定超時檢查 (10 秒) - 如果在 10 秒內沒有呼叫 onRuntimeInitialized，則顯示錯誤
-        opencvLoadTimeout = setTimeout(() => {
+        // 【載入診斷】設定超時檢查 (10 秒)
+        var opencvLoadTimeout = setTimeout(() => {
              var statusDiv = document.getElementById('status');
-             if (statusDiv && statusDiv.innerHTML === 'OpenCV 載入中...') {
-                statusDiv.innerHTML = '錯誤：OpenCV 載入超時 (10 秒)。請檢查網路連線或嘗試重新整理。';
-                console.error("DIAG ERROR: OpenCV.js 載入超時。可能因為網路問題。");
+             if (statusDiv && !opencvReady) { // 僅在未準備好時才顯示超時
+                statusDiv.innerHTML = '錯誤：OpenCV 載入超時 (10 秒)。請檢查網路連線。';
+                console.error("DIAG ERROR: OpenCV.js 載入超時。");
             }
-        }, 10000); // 10 秒超時
+        }, 10000); 
         
     </script>
     
-    <!-- 後載入 OpenCV.js，它會找到上方同步定義的 Module -->
-    <!-- 新增 onerror 處理，以捕捉腳本無法下載的錯誤 -->
+    <!-- 後載入 OpenCV.js -->
     <script async src="https://docs.opencv.org/4.x/opencv.js" onerror="document.getElementById('status').innerHTML = '錯誤：OpenCV 腳本載入失敗（網路或資源錯誤）。'; console.error('DIAG ERROR: OpenCV.js Script Loading Failed.')"></script>
-    
-    <!-- 修正時序問題：確保 app.js（包含 initAppWithOpenCV 函式）在 OpenCV 呼叫其 onRuntimeInitialized 之前完全載入 -->
-    <script src="app.js"></script> 
     
 </head>
 <body class="bg-gray-900 text-white font-sans flex items-center justify-center p-4">
@@ -92,6 +104,7 @@
         <canvas id="canvasBuffer" style="display: none;"></canvas>
     </div>
     
-    <!-- 原始 app.js 載入標籤已移除 -->
+    <!-- 載入 app.js (定義所有函式，然後設定旗標 B) - 放在 body 底部確保 DOM 準備就緒 -->
+    <script src="app.js"></script> 
 </body>
 </html>
