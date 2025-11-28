@@ -9,11 +9,41 @@
     <!-- 引入 獨立的 CSS 文件 -->
     <link rel="stylesheet" href="style.css">
     
-    <!-- 關鍵修正：先載入 app.js，確保 Module 物件定義完成 -->
-    <script src="app.js"></script>
+    <!-- 核心修正：同步定義 Module 物件，確保 OpenCV 載入時立即找到回呼函式 -->
+    <script>
+        // 宣告 Module 物件，確保它是全域且立即存在
+        var Module = {}; 
+        var opencvLoadTimeout; // 宣告超時檢查器
+        
+        // OpenCV.js 載入完成時會呼叫這個函式
+        Module.onRuntimeInitialized = function() {
+            clearTimeout(opencvLoadTimeout); // 成功載入，清除超時
+            console.log("DIAG: OpenCV 核心載入完成。準備執行 app.js 初始化。");
+            
+            // 由於 app.js 在 body 底部，DOM 元素已經準備好。
+            // 觸發 app.js 內定義的初始化邏輯
+            if (typeof initAppWithOpenCV === 'function') {
+                initAppWithOpenCV();
+            } else {
+                 // 如果 app.js 載入失敗或太慢，這會顯示錯誤
+                 document.getElementById('status').innerHTML = '錯誤：OpenCV 載入成功，但 app.js 初始化函式遺失。';
+            }
+        };
+        
+        // 【載入診斷】設定超時檢查 (15 秒)
+        opencvLoadTimeout = setTimeout(() => {
+             var statusDiv = document.getElementById('status');
+             if (statusDiv && statusDiv.innerHTML === 'OpenCV 載入中...') {
+                statusDiv.innerHTML = '錯誤：OpenCV 載入超時 (15 秒)。請檢查網路連線或嘗試重新整理。';
+                console.error("DIAG ERROR: OpenCV.js 載入超時。可能因為網路問題。");
+            }
+        }, 15000); // 15 秒超時
+        
+    </script>
     
-    <!-- 後載入 OpenCV.js，它會找到 app.js 中定義的 Module.onRuntimeInitialized -->
+    <!-- 後載入 OpenCV.js，它會找到上方同步定義的 Module -->
     <script async src="https://docs.opencv.org/4.x/opencv.js"></script>
+    
 </head>
 <body class="bg-gray-900 text-white font-sans flex items-center justify-center p-4">
     <!-- main-container 使用了 style.css 中的樣式來適應手機高度 -->
@@ -57,5 +87,8 @@
         <!-- 緩衝 Canvas (預設隱藏) -->
         <canvas id="canvasBuffer" style="display: none;"></canvas>
     </div>
+    
+    <!-- 將 app.js 移回 body 底部，確保所有 DOM 元素已載入 -->
+    <script src="app.js"></script>
 </body>
 </html>
