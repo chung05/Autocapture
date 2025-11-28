@@ -6,6 +6,8 @@
  * 3. 魯棒性增強：在 takeSnapshot 中加入 try...catch 區塊，防止 CV 運算錯誤導致應用程式卡在「處理中」。
  * 4. 修正透視變換 (Perspective Transform) 的頂點排序邏輯，確保校正正確。
  * 5. 強化下載圖片邏輯，確保下載的圖片格式正確。
+ * 6. 【本次修正】新增 processVideo 全域 try...catch，防止 CV 崩潰導致無偵測框線。
+ * 7. 【本次修正】強化 resetAndStartCamera 函式，確保相機軌道被強制關閉。
  */
 
 // 宣告全域變數
@@ -106,6 +108,14 @@ if (startButton && canvasBuffer && snapshotContainer && snapshotImage && downloa
 
 // 重設並重新啟動相機 (用於重新拍攝)
 function resetAndStartCamera() {
+    // 【本次修正】強制停止相機串流，解決相機圖示未關閉的問題
+    if (video.srcObject) {
+        video.srcObject.getTracks().forEach(track => track.stop());
+        video.srcObject = null;
+        console.log("DIAG: resetAndStartCamera - 成功停止相機軌道。");
+    }
+    streaming = false; // 確保處理迴圈停止
+
     snapshotContainer.style.display = 'none'; // 隱藏結果
     canvasOutput.style.display = 'block';     // 顯示預覽
     startButton.style.display = 'block';      // 顯示開始按鈕
@@ -177,107 +187,117 @@ function startCamera() {
 function processVideo() {
     if (!streaming) return;
 
-    if (src && !src.isDeleted()) {
-        src.delete(); 
-    }
-    if (dst && !dst.isDeleted()) {
-        dst.delete();
-    }
-    
-    canvasBufferCtx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight);
-    src = cv.imread(canvasBuffer);
-    dst = src.clone(); 
+    try { // 【本次修正】新增 try...catch 捕捉 CV 迴圈中的崩潰
+        if (src && !src.isDeleted()) {
+            src.delete(); 
+        }
+        if (dst && !dst.isDeleted()) {
+            dst.delete();
+        }
+        
+        canvasBufferCtx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight);
+        src = cv.imread(canvasBuffer);
+        dst = src.clone(); 
 
-    let cardContour = detectCardBoundary(src); 
-    
-    // 檢查輪廓是否被找到且通過品質檢查
-    const isQualityOK = cardContour && isCardStableAndClear(cardContour);
+        let cardContour = detectCardBoundary(src); 
+        
+        // 檢查輪廓是否被找到且通過品質檢查
+        const isQualityOK = cardContour && isCardStableAndClear(cardContour);
 
-    if (isQualityOK) {
-        // 獲取當前名片的幾何數據
-        let currentRect = cv.minAreaRect(cardContour);
-        let currentArea = cv.contourArea(cardContour);
-        let isGeometricallyStable = false;
+        if (isQualityOK) {
+            // 獲取當前名片的幾何數據
+            let currentRect = cv.minAreaRect(cardContour);
+            let currentArea = cv.contourArea(cardContour);
+            let isGeometricallyStable = false;
 
-        if (lastStableRectData) {
-            // 進行幾何穩定性比較 (這是本次的核心修正)
-            const prevCenter = lastStableRectData.center;
-            const currCenter = currentRect.center;
+            if (lastStableRectData) {
+                // 進行幾何穩定性比較 (這是本次的核心修正)
+                const prevCenter = lastStableRectData.center;
+                const currCenter = currentRect.center;
 
-            // 1. 檢查中心點移動距離
-            const centerDistance = Math.sqrt(
-                Math.pow(currCenter.x - prevCenter.x, 2) + 
-                Math.pow(currCenter.y - prevCenter.y, 2)
-            );
-            
-            // 2. 檢查面積變化比例
-            const areaChangeRatio = Math.abs(currentArea - lastStableRectData.area) / lastStableRectData.area;
+                // 1. 檢查中心點移動距離
+                const centerDistance = Math.sqrt(
+                    Math.pow(currCenter.x - prevCenter.x, 2) + 
+                    Math.pow(currCenter.y - prevCenter.y, 2)
+                );
+                
+                // 2. 檢查面積變化比例
+                const areaChangeRatio = Math.abs(currentArea - lastStableRectData.area) / lastStableRectData.area;
 
-            if (centerDistance < MOVEMENT_THRESHOLD && areaChangeRatio < AREA_CHANGE_THRESHOLD) {
+                if (centerDistance < MOVEMENT_THRESHOLD && areaChangeRatio < AREA_CHANGE_THRESHOLD) {
+                    isGeometricallyStable = true;
+                }
+            } else {
+                // 這是找到的第一個合格輪廓，先假設它穩定
                 isGeometricallyStable = true;
             }
+            
+            if (isGeometricallyStable) {
+                 stableFrameCount++;
+                 
+                 // 更新上一個穩定輪廓的數據
+                 lastStableRectData = {
+                     center: { x: currentRect.center.x, y: currentRect.center.y },
+                     area: currentArea
+                 };
+
+                 // 計算穩定度百分比
+                 const stabilityRatio = Math.min(stableFrameCount, STABILITY_THRESHOLD) / STABILITY_THRESHOLD;
+                 
+                 // 顏色漸變：從黃 (100, 255, 0) 到綠 (0, 255, 0)
+                 const r = Math.round(100 * (1 - stabilityRatio)); 
+                 const g = 255;
+                 const b = 0; 
+                 
+                 const dynamicColor = new cv.Scalar(r, g, b, 255);
+                 const dynamicThickness = Math.round(3 + 3 * stabilityRatio); // 粗細從 3 漸變到 6
+
+                 drawContour(dst, cardContour, dynamicColor, dynamicThickness); 
+
+                 statusDiv.innerHTML = `名片已鎖定！請保持**完全靜止**。穩定進度：${Math.min(stableFrameCount, STABILITY_THRESHOLD)} / ${STABILITY_THRESHOLD}`;
+                 
+                 if (stableFrameCount >= STABILITY_THRESHOLD) {
+                    // 達到穩定門檻，拍照
+                    takeSnapshot(src, cardContour); 
+                 }
+                 dynamicColor.delete(); // 釋放動態顏色
+            } else {
+                 // 輪廓通過品質檢查，但移動或尺寸變化太大
+                 stableFrameCount = 0; // 重設計數器
+                 
+                 const normalColor = new cv.Scalar(255, 165, 0, 255); // 橙色
+                 drawContour(dst, cardContour, normalColor, 3);
+                 normalColor.delete();
+
+                 statusDiv.innerHTML = '偵測到物體，但移動或抖動過大。請保持靜止！';
+            }
+            currentRect.delete(); // 釋放 RotatedRect 記憶體
+            cardContour.delete(); 
         } else {
-            // 這是找到的第一個合格輪廓，先假設它穩定
-            isGeometricallyStable = true;
+            // 沒有輪廓或輪廓品質不佳
+            stableFrameCount = 0; // 重設計數器
+            lastStableRectData = null; // 重設幾何數據
+            
+            if (cardContour && !isCardStableAndClear(cardContour)) {
+                 cardContour.delete();
+                 statusDiv.innerHTML = '偵測到輪廓，但形狀或長寬比不符名片要求。';
+            } else {
+                 statusDiv.innerHTML = '請將名片置於畫面中央。';
+            }
         }
         
-        if (isGeometricallyStable) {
-             stableFrameCount++;
-             
-             // 更新上一個穩定輪廓的數據
-             lastStableRectData = {
-                 center: { x: currentRect.center.x, y: currentRect.center.y },
-                 area: currentArea
-             };
-
-             // 計算穩定度百分比
-             const stabilityRatio = Math.min(stableFrameCount, STABILITY_THRESHOLD) / STABILITY_THRESHOLD;
-             
-             // 顏色漸變：從黃 (100, 255, 0) 到綠 (0, 255, 0)
-             const r = Math.round(100 * (1 - stabilityRatio)); 
-             const g = 255;
-             const b = 0; 
-             
-             const dynamicColor = new cv.Scalar(r, g, b, 255);
-             const dynamicThickness = Math.round(3 + 3 * stabilityRatio); // 粗細從 3 漸變到 6
-
-             drawContour(dst, cardContour, dynamicColor, dynamicThickness); 
-
-             statusDiv.innerHTML = `名片已鎖定！請保持**完全靜止**。穩定進度：${Math.min(stableFrameCount, STABILITY_THRESHOLD)} / ${STABILITY_THRESHOLD}`;
-             
-             if (stableFrameCount >= STABILITY_THRESHOLD) {
-                // 達到穩定門檻，拍照
-                takeSnapshot(src, cardContour); 
-             }
-             dynamicColor.delete(); // 釋放動態顏色
-        } else {
-             // 輪廓通過品質檢查，但移動或尺寸變化太大
-             stableFrameCount = 0; // 重設計數器
-             
-             const normalColor = new cv.Scalar(255, 165, 0, 255); // 橙色
-             drawContour(dst, cardContour, normalColor, 3);
-             normalColor.delete();
-
-             statusDiv.innerHTML = '偵測到物體，但移動或抖動過大。請保持靜止！';
-        }
-        currentRect.delete(); // 釋放 RotatedRect 記憶體
-        cardContour.delete(); 
-    } else {
-        // 沒有輪廓或輪廓品質不佳
-        stableFrameCount = 0; // 重設計數器
-        lastStableRectData = null; // 重設幾何數據
+        cv.imshow('canvasOutput', dst); 
         
-        if (cardContour && !isCardStableAndClear(cardContour)) {
-             cardContour.delete();
-             statusDiv.innerHTML = '偵測到輪廓，但形狀或長寬比不符名片要求。';
-        } else {
-             statusDiv.innerHTML = '請將名片置於畫面中央。';
-        }
+        requestAnimationFrame(processVideo); 
+
+    } catch (e) {
+        // 捕捉 processVideo 迴圈中的任何錯誤
+        console.error("DIAG ERROR: ProcessVideo 迴圈意外崩潰，正在重設：", e);
+        streaming = false; // 停止 requestAnimationFrame 呼叫
+        // 呼叫重設函式以清理 UI 和相機資源
+        statusDiv.innerHTML = `錯誤：影像處理迴圈意外停止 (${e.message})。請點擊「開始」重試。`;
+        resetAndStartCamera(); 
     }
-    
-    cv.imshow('canvasOutput', dst); 
-    
-    requestAnimationFrame(processVideo); 
 }
 
 // ----------------------------------------------------------------
@@ -393,12 +413,15 @@ function drawContour(outputMat, contour, color, thickness) {
 // 拍照功能 (修正頂點排序邏輯，確保透視變換正確, 並加入錯誤處理)
 function takeSnapshot(sourceMat, contour) {
     // 1. 【關鍵修正】立即停止串流並更新狀態 (確保資源釋放)
+    // 這裡我們只停止串流，釋放相機資源的工作已主要移到 resetAndStartCamera 中
     streaming = false;
     statusDiv.innerHTML = '處理中，請稍候...';
+    // 確保這裡停止相機軌道 (與 resetAndStartCamera 重複但保險)
     if (video.srcObject) {
         video.srcObject.getTracks().forEach(track => track.stop());
         video.srcObject = null;
     }
+
 
     // 宣告可能需要在 finally 或 catch 中釋放的 Mat 物件
     let srcTri = null;
