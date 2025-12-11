@@ -6,10 +6,9 @@
     <title>AI 名片掃描器</title>
     <!-- 引入 Tailwind CSS (用於快速樣式設置) -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- 引入 獨立的 CSS 文件 -->
     <link rel="stylesheet" href="style.css">
     
-    <!-- 全域載入控制腳本 (必須在 head 中先定義) -->
+    <!-- 全域載入控制腳本 (雙旗標機制) -->
     <script>
         // 1. 定義全局旗標
         var Module = {}; 
@@ -21,15 +20,13 @@
             var statusDiv = document.getElementById('status');
 
             if (opencvReady && appLoaded) {
-                // 兩者都準備就緒
                 clearTimeout(opencvLoadTimeout); 
-                console.log("DIAG: 雙旗標檢查通過。開始應用程式初始化。");
+                console.log("DIAG: 雙旗標檢查通過。開始應用程式自動初始化。");
                 
                 // 呼叫 app.js 中定義的初始化函式
                 if (typeof initAppWithOpenCV === 'function') {
                     initAppWithOpenCV();
                 } else {
-                    // 這是最後的防線，如果程式碼邏輯有誤，會捕捉到
                     statusDiv.innerHTML = '致命錯誤：初始化函式遺失。';
                     console.error("DIAG ERROR: initAppWithOpenCV 仍然未定義。");
                 }
@@ -49,7 +46,7 @@
         // 【載入診斷】設定超時檢查 (10 秒)
         var opencvLoadTimeout = setTimeout(() => {
              var statusDiv = document.getElementById('status');
-             if (statusDiv && !opencvReady) { // 僅在未準備好時才顯示超時
+             if (statusDiv && !opencvReady) { 
                 statusDiv.innerHTML = '錯誤：OpenCV 載入超時 (10 秒)。請檢查網路連線。';
                 console.error("DIAG ERROR: OpenCV.js 載入超時。");
             }
@@ -62,7 +59,6 @@
     
 </head>
 <body class="bg-gray-900 text-white font-sans flex items-center justify-center p-4">
-    <!-- main-container 使用了 style.css 中的樣式來適應手機高度 -->
     <div class="main-container bg-gray-800 p-6 rounded-xl shadow-2xl space-y-4">
         <h1 class="text-3xl font-bold text-center text-blue-400">名片掃描與校正</h1>
         
@@ -72,7 +68,7 @@
         </div>
 
         <!-- 影像顯示區域 -->
-        <div class="relative flex-grow flex justify-center items-center w-full bg-gray-900 rounded-xl overflow-hidden shadow-inner min-h-[300px]">
+        <div class="video-canvas-container bg-gray-900 rounded-xl shadow-inner">
             <!-- 實際的影片串流，用於擷取畫面但隱藏 -->
             <video id="video" playsinline autoplay muted></video>
             
@@ -81,8 +77,8 @@
             
             <!-- 處理結果圖片顯示區域 (預設隱藏) -->
             <div id="snapshotContainer">
-                <img id="snapshotImage" alt="校正後的名片圖片" class="mb-4">
-                <div class="flex space-x-4 mt-2 flex-shrink-0">
+                <img id="snapshotImage" alt="校正後的名片圖片" class="mb-4 rounded-lg shadow-xl max-w-full max-h-[80vh]">
+                <div class="flex space-x-4 mt-4 flex-shrink-0">
                     <button id="downloadSnapshot" class="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2 px-4 rounded-lg shadow-lg transition duration-150">
                         下載圖片
                     </button>
@@ -91,20 +87,21 @@
                     </button>
                 </div>
             </div>
+
+            <!-- R3 專用：超時後顯示的重試按鈕/訊息 -->
+            <div id="timeoutContainer" class="absolute inset-0 bg-black bg-opacity-70 flex-col justify-center items-center rounded-xl hidden">
+                 <p class="text-xl font-bold mb-4">🚨 偵測超時：請放入名片</p>
+                 <button id="timeoutRetryButton" class="bg-yellow-500 hover:bg-yellow-600 text-gray-900 font-bold py-3 px-6 rounded-xl shadow-lg transition duration-150">
+                    重啟掃描
+                 </button>
+            </div>
         </div>
         
-        <!-- 開始按鈕/控制區域 (固定在底部) -->
-        <div class="text-center flex-shrink-0">
-            <button id="startButton" class="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold text-lg rounded-xl shadow-xl disabled:opacity-50 transition duration-150" disabled>
-                OpenCV 載入中...
-            </button>
-        </div>
-
         <!-- 緩衝 Canvas (預設隱藏) -->
         <canvas id="canvasBuffer" style="display: none;"></canvas>
     </div>
     
-    <!-- 載入 app.js (定義所有函式，然後設定旗標 B) - 放在 body 底部確保 DOM 準備就緒 -->
+    <!-- 載入 app.js (定義所有函式，然後設定旗標 B) - 確保在 DOM 載入後執行 -->
     <script src="app.js"></script> 
 </body>
 </html>
