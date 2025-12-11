@@ -1,212 +1,164 @@
 /**
- * 名片掃描應用程式的主邏輯 (app.js) - 最終穩定版
- * 修正重點：
- * 1. 移除冗餘的 Module 定義。
- * 2. 將所有 DOM 查詢和初始化邏輯包裝在 initAppWithOpenCV 函式中。
- * 3. 在腳本結尾設置 appLoaded 旗標，並呼叫 checkInitialization()，配合 index.html 解決時序問題。
+ * 名片掃描應用程式的主邏輯 (app.js)
+ * 實作自動啟動、10秒超時重啟，以及穩定後自動拍照功能。
  */
 
 // 宣告全域變數
 let src = null; 
 let dst = null; 
 let streaming = false;
-let canvasBuffer = null; 
 let canvasBufferCtx = null; 
 
-// 穩定性追蹤變數
-let stableFrameCount = 0;
-let lastStableRectData = null; // Stores {center: {x, y}, area}
-
-// 穩定性參數
-const STABILITY_THRESHOLD = 30; // 需要連續 30 幀 (約 1 秒) 保持幾何穩定
+// 穩定性參數 (R4)
+const STABILITY_THRESHOLD = 30; // 達到此幀數後自動拍照 (約 1 秒)
 const MOVEMENT_THRESHOLD = 15; // 允許的最大中心點移動距離 (像素)
 const AREA_CHANGE_THRESHOLD = 0.1; // 允許的最大面積變化比例 (10%)
 
+// 偵測超時參數 (R3)
+const NO_CARD_TIMEOUT_MS = 10000; // 10 秒
+let noCardTimer = null; 
 
-// 宣告 DOM 元素參照 (將在 initAppWithOpenCV 內賦值)
+// 追蹤狀態
+let stableFrameCount = 0;
+let lastStableRectData = null; 
+let autoCaptureInProgress = false; // 確保只拍一次
+
+// 宣告 DOM 元素參照
 let video = null;
 let canvasOutput = null;
 let statusDiv = null;
-let startButton = null; 
+let canvasBuffer = null;
 let snapshotContainer = null;
 let snapshotImage = null;
 let downloadSnapshot = null;
 let retakeButton = null;
+let timeoutContainer = null;
+let timeoutRetryButton = null;
 
 
-// ** 核心初始化函式：在 OpenCV 核心載入完成後被呼叫 **
+// ** 核心初始化函式：在 OpenCV 和 app.js 都載入完成後被呼叫 **
 function initAppWithOpenCV() {
     
-    // 取得 DOM 元素參照 (此時 DOM 元素已完全載入)
+    // 取得 DOM 元素參照
     video = document.getElementById('video');
     canvasOutput = document.getElementById('canvasOutput');
     statusDiv = document.getElementById('status');
-    startButton = document.getElementById('startButton'); 
     canvasBuffer = document.getElementById('canvasBuffer');
     snapshotContainer = document.getElementById('snapshotContainer');
     snapshotImage = document.getElementById('snapshotImage');
     downloadSnapshot = document.getElementById('downloadSnapshot');
     retakeButton = document.getElementById('retakeButton');
+    timeoutContainer = document.getElementById('timeoutContainer');
+    timeoutRetryButton = document.getElementById('timeoutRetryButton');
     
-    // 檢查是否所有必要的 DOM 元素都已找到
-    if (!startButton || !canvasBuffer || !snapshotContainer || !snapshotImage || !downloadSnapshot || !retakeButton || !statusDiv) {
-        statusDiv.innerHTML = '致命錯誤：找不到必要的 DOM 元素。應用程式無法啟動。';
-        console.error("DIAG ERROR: Missing critical DOM elements after OpenCV initialized.");
-        return;
-    }
-    
-    // 更新狀態和按鈕
-    statusDiv.innerHTML = 'OpenCV 載入完成。請點擊「開始」按鈕。';
-    console.log("DIAG: initAppWithOpenCV 成功執行，OpenCV 核心已準備就緒。");
-    
-    startButton.addEventListener('click', startCamera);
-    startButton.disabled = false;
-    startButton.innerHTML = '點擊開始';
-
-    // 初始化拍照結果顯示區域的事件監聽器 (強化下載邏輯)
-    downloadSnapshot.addEventListener('click', () => {
-        const img = document.getElementById('snapshotImage');
-        const tempCanvas = document.createElement('canvas');
-        
-        // 嘗試從 img 標籤獲取實際尺寸
-        tempCanvas.width = img.naturalWidth || 1280;
-        tempCanvas.height = img.naturalHeight || 720;
-        const tempCtx = tempCanvas.getContext('2d');
-        
-        if (!img.src || img.naturalWidth === 0) {
-            statusDiv.innerHTML = '無法下載：圖片數據不存在。請重新拍攝。';
-            console.error('無法下載：圖片數據不存在。');
-            return;
-        }
-        
-        // 由於 img.src 已經是 DataURL，我們直接繪製即可
-        tempCtx.drawImage(img, 0, 0, tempCanvas.width, tempCanvas.height);
-
-        const a = document.createElement('a');
-        a.href = tempCanvas.toDataURL('image/png');
-        a.download = 'business_card_corrected.png';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-    });
-    
+    // 初始化事件監聽器
+    downloadSnapshot.addEventListener('click', downloadSnapshotImage);
     retakeButton.addEventListener('click', resetAndStartCamera);
+    timeoutRetryButton.addEventListener('click', startCamera);
+    
+    // R1: 載入完成後，直接開始相機
+    statusDiv.innerHTML = 'OpenCV 載入完成。正在啟動相機...';
+    console.log("DIAG: 初始化成功，自動啟動相機。");
+    
+    startCamera();
 }
 
+// R3: 處理 10 秒未偵測到名片的超時
+function handleNoCardTimeout() {
+    if (!streaming || autoCaptureInProgress) return; 
 
-// 重設並重新啟動相機 (用於重新拍攝)
-function resetAndStartCamera() {
-    // 停止相機串流
+    // 1. 停止偵測迴圈
+    streaming = false;
+    
+    // 2. 停止相機串流
     if (video.srcObject) {
         video.srcObject.getTracks().forEach(track => track.stop());
         video.srcObject = null;
-        console.log("DIAG: resetAndStartCamera - 成功停止相機軌道。");
     }
     
-    // 顯式清理 Mat 物件
-    if (src && !src.isDeleted()) {
-        src.delete(); 
-        src = null;
-    }
-    if (dst && !dst.isDeleted()) {
-        dst.delete();
-        dst = null;
-    }
-
-    streaming = false; // 確保處理迴圈停止
+    // 3. 顯示超時訊息和重啟按鈕
+    statusDiv.innerHTML = '偵測已暫停。';
+    timeoutContainer.style.display = 'flex';
     
-    // 調整 UI 顯示
-    snapshotContainer.style.display = 'none'; // 隱藏結果
-    canvasOutput.style.display = 'block';     // 顯示預覽
-    startButton.style.display = 'block';      // 顯示開始按鈕
-    statusDiv.innerHTML = '點擊「開始」重新拍攝。';
+    // 4. 清理 OpenCV Mats
+    cleanupOpenCVMats();
     
     // 重設穩定性狀態
     stableFrameCount = 0; 
     lastStableRectData = null; 
 }
 
-// 2. 啟動相機並設定串流 
+
+// R1: 啟動相機並設定串流
 function startCamera() {
-    startButton.style.display = 'none'; // 隱藏開始按鈕
-    canvasOutput.style.display = 'block'; // 確保 Canvas 預覽顯示
+    // 關閉任何超時 UI
+    timeoutContainer.style.display = 'none';
     statusDiv.innerHTML = '正在請求相機權限...';
+    autoCaptureInProgress = false; // 重啟時重設捕捉狀態
     
-    // 請求高解析度並啟用連續對焦 (確保影像清晰度)
+    // 請求高解析度並啟用連續對焦 
     navigator.mediaDevices.getUserMedia({
         video: {
             facingMode: 'environment',
-            width: { ideal: 1280 }, // 請求高寬度以提高影像品質
-            height: { ideal: 720 }, // 請求高高度以提高影像品質
-            focusMode: "continuous" // 嘗試強制連續自動對焦 (iOS 上可能只支持 'auto')
+            width: { ideal: 1280 }, 
+            height: { ideal: 720 }, 
+            focusMode: "continuous" // R4: 自動對焦
         }
     })
     .then(stream => {
         video.srcObject = stream;
-        
-        console.log("DIAG: getUserMedia 成功取得串流。等待 loadeddata 事件...");
         
         video.addEventListener('loadeddata', function initializeVideoAndStartLoop() {
             video.removeEventListener('loadeddata', initializeVideoAndStartLoop);
 
             const videoWidth = video.videoWidth;
             const videoHeight = video.videoHeight;
-            console.log(`DIAG: loadeddata 事件觸發。串流解析度: ${videoWidth}x${videoHeight}`);
             
             if (videoWidth === 0 || videoHeight === 0) {
-                 const errMsg = '致命錯誤：串流尺寸為 0x0。請重新整理或檢查相機資源是否被佔用。';
-                 statusDiv.innerHTML = errMsg;
-                 startButton.style.display = 'block'; 
-                 // 嘗試停止串流以釋放資源
-                 if (video.srcObject) { video.srcObject.getTracks().forEach(track => track.stop()); }
+                 statusDiv.innerHTML = '致命錯誤：串流尺寸為 0x0。請重新整理。';
                  return;
             }
 
-            // 【修正】確保 Canvas 尺寸與影片串流尺寸完全一致
+            // 確保 Canvas 尺寸與影片串流尺寸完全一致
             canvasOutput.width = canvasBuffer.width = videoWidth;
             canvasOutput.height = canvasBuffer.height = videoHeight;
             
             canvasBufferCtx = canvasBuffer.getContext('2d');
             
             video.play().then(() => {
-                // 檢查實際獲取的解析度
-                const track = stream.getVideoTracks()[0];
-                const settings = track.getSettings();
-                console.log(`DIAG: 實際解析度: ${settings.width}x${settings.height}, 對焦模式: ${settings.focusMode}`);
-                
                 statusDiv.innerHTML = '影像串流啟動成功，請將名片置於畫面中央。';
-                console.log("DIAG: video.play() 成功。準備進入處理迴圈...");
                 
                 streaming = true;
                 processVideo(); 
                 
             }).catch(e => {
-                const errMsg = `錯誤：影像播放失敗。請檢查錯誤碼或權限: ${e.message || e.name}`;
-                statusDiv.innerHTML = errMsg;
+                statusDiv.innerHTML = `錯誤：影像播放失敗 (${e.message})。`;
                 console.error("DIAG ERROR: 影像播放失敗:", e);
-                startButton.style.display = 'block';
             });
         });
     })
     .catch(err => {
-        const errMsg = `錯誤：無法存取相機。請檢查權限是否被拒絕。(Error: ${err.name} - ${err.message})`;
-        statusDiv.innerHTML = errMsg;
+        statusDiv.innerHTML = `錯誤：無法存取相機。請檢查權限是否被拒絕。(Error: ${err.name})`;
         console.error("DIAG ERROR: 無法存取相機:", err);
-        startButton.style.display = 'block'; 
     });
 }
 
-// 3. 影像處理迴圈 (核心邏輯) 
+// 4. 影像處理迴圈 (核心邏輯) 
 function processVideo() {
-    if (!streaming) return;
+    if (!streaming || autoCaptureInProgress) {
+        cleanupOpenCVMats();
+        return; 
+    }
+
+    // 確保定時器已停止，當幀率高時，setTimeout 不會累積
+    if (noCardTimer) {
+        clearTimeout(noCardTimer);
+        noCardTimer = null;
+    }
 
     try {
-        if (src && !src.isDeleted()) {
-            src.delete(); 
-        }
-        if (dst && !dst.isDeleted()) {
-            dst.delete();
-        }
+        // 清理上一次迴圈的 Mat 物件
+        cleanupOpenCVMats();
         
         // 繪製影像到緩衝區
         canvasBufferCtx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight);
@@ -215,93 +167,64 @@ function processVideo() {
 
         let cardContour = detectCardBoundary(src); 
         
-        // 偵測到的四邊形是否符合名片品質要求 (面積, 長寬比, 凸性)
         const isQualityOK = cardContour && isCardStableAndClear(cardContour);
 
-        if (cardContour) { // 只要找到輪廓就進入繪製流程
-            if (isQualityOK) {
-                // 輪廓品質合格，檢查穩定性
-                let currentRect = cv.minAreaRect(cardContour);
-                let currentArea = cv.contourArea(cardContour);
-                let isGeometricallyStable = false;
-
-                if (lastStableRectData) {
-                    // 幾何穩定性比較
-                    const prevCenter = lastStableRectData.center;
-                    const currCenter = currentRect.center;
-
-                    const centerDistance = Math.sqrt(
-                        Math.pow(currCenter.x - prevCenter.x, 2) + 
-                        Math.pow(currCenter.y - prevCenter.y, 2)
-                    );
-                    
-                    const areaChangeRatio = Math.abs(currentArea - lastStableRectData.area) / lastStableRectData.area;
-
-                    if (centerDistance < MOVEMENT_THRESHOLD && areaChangeRatio < AREA_CHANGE_THRESHOLD) {
-                        isGeometricallyStable = true;
-                    }
-                } else {
-                    isGeometricallyStable = true;
-                }
-                
-                if (isGeometricallyStable) {
-                     // *** 穩定 - 綠色 ***
-                     stableFrameCount++;
-                     
-                     lastStableRectData = {
-                         center: { x: currentRect.center.x, y: currentRect.center.y },
-                         area: currentArea
-                     };
-
-                     const stabilityRatio = Math.min(stableFrameCount, STABILITY_THRESHOLD) / STABILITY_THRESHOLD;
-                     
-                     // 顏色漸變：從黃到綠
-                     const r = Math.round(100 * (1 - stabilityRatio)); 
-                     const g = 255;
-                     const b = 0; 
-                     
-                     const dynamicColor = new cv.Scalar(r, g, b, 255);
-                     const dynamicThickness = Math.round(3 + 3 * stabilityRatio); 
-
-                     drawContour(dst, cardContour, dynamicColor, dynamicThickness); 
-
-                     statusDiv.innerHTML = `名片已鎖定！請保持**完全靜止**。穩定進度：${Math.min(stableFrameCount, STABILITY_THRESHOLD)} / ${STABILITY_THRESHOLD}`;
-                     
-                     if (stableFrameCount >= STABILITY_THRESHOLD) {
-                        // 達到穩定門檻，拍照
-                        takeSnapshot(src, cardContour); 
-                     }
-                     dynamicColor.delete(); 
-                } else {
-                     // *** 不穩定 - 橙色 ***
-                     stableFrameCount = 0; 
-                     
-                     const normalColor = new cv.Scalar(255, 165, 0, 255); // 橙色
-                     drawContour(dst, cardContour, normalColor, 3);
-                     normalColor.delete();
-
-                     statusDiv.innerHTML = '偵測到物體，但移動或抖動過大。請保持靜止！';
-                }
-                currentRect.delete(); 
-            } else {
-                // *** 輪廓不合格 - 紅色 ***
-                stableFrameCount = 0; 
-                lastStableRectData = null; 
-                
-                const warningColor = new cv.Scalar(255, 0, 0, 255); // 紅色警告
-                drawContour(dst, cardContour, warningColor, 2);
-                warningColor.delete();
-
-                statusDiv.innerHTML = '偵測到輪廓，但形狀或長寬比不符名片要求。';
-            }
+        if (cardContour && isQualityOK) { 
+            // R4: 偵測到名片且品質合格，開始穩定性檢查
             
-            // 無論如何，用完即刪除輪廓
-            cardContour.delete(); 
+            let currentRect = cv.minAreaRect(cardContour);
+            let currentArea = cv.contourArea(cardContour);
+            let isGeometricallyStable = checkGeometricStability(cardContour, currentRect, currentArea);
+
+            if (isGeometricallyStable) {
+                 // *** 穩定狀態 - 綠色 ***
+                 stableFrameCount++;
+                 
+                 lastStableRectData = { center: { x: currentRect.center.x, y: currentRect.center.y }, area: currentArea };
+
+                 const stabilityRatio = Math.min(stableFrameCount, STABILITY_THRESHOLD) / STABILITY_THRESHOLD;
+                 
+                 // 顏色漸變：從黃到綠
+                 const r = Math.round(100 * (1 - stabilityRatio)); 
+                 const g = 255;
+                 const b = 0; 
+                 
+                 const dynamicColor = new cv.Scalar(r, g, b, 255);
+                 const dynamicThickness = Math.round(3 + 3 * stabilityRatio); 
+
+                 drawContour(dst, cardContour, dynamicColor, dynamicThickness); 
+
+                 statusDiv.innerHTML = `名片已鎖定！請保持**完全靜止**。穩定進度：${Math.min(stableFrameCount, STABILITY_THRESHOLD)} / ${STABILITY_THRESHOLD}`;
+                 
+                 if (stableFrameCount >= STABILITY_THRESHOLD) {
+                    // R4: 達到穩定門檻，自動拍照
+                    autoCaptureInProgress = true; 
+                    takeSnapshot(src, cardContour); 
+                 }
+                 dynamicColor.delete(); 
+            } else {
+                 // *** 不穩定狀態 - 橙色 ***
+                 stableFrameCount = 0; 
+                 
+                 const normalColor = new cv.Scalar(255, 165, 0, 255); // 橙色
+                 drawContour(dst, cardContour, normalColor, 3);
+                 normalColor.delete();
+
+                 statusDiv.innerHTML = '偵測到名片，但晃動或模糊。請保持靜止！';
+            }
+            currentRect.delete(); 
         } else {
-            // 沒有輪廓找到
+            // R3: 未偵測到名片或品質不合格
             stableFrameCount = 0; 
             lastStableRectData = null; 
+            
             statusDiv.innerHTML = '請將名片置於畫面中央，背景對比度要高。'; 
+            
+            // 啟動超時定時器 (R3)
+            if (!noCardTimer) {
+                noCardTimer = setTimeout(handleNoCardTimeout, NO_CARD_TIMEOUT_MS);
+                console.log("DIAG: 啟動無名片偵測超時定時器。");
+            }
         }
         
         cv.imshow('canvasOutput', dst); 
@@ -311,12 +234,141 @@ function processVideo() {
     } catch (e) {
         console.error("DIAG ERROR: ProcessVideo 迴圈意外崩潰，正在重設：", e);
         streaming = false; 
-        statusDiv.innerHTML = `錯誤：影像處理迴圈意外停止 (${e.message})。請點擊「開始」重試。`;
-        resetAndStartCamera(); 
+        statusDiv.innerHTML = `錯誤：影像處理迴圈意外停止 (${e.message})。`;
+        // 在錯誤發生時，顯示重試按鈕而不是自動重啟，讓用戶決定
+        timeoutContainer.style.display = 'flex';
+        cleanupOpenCVMats();
     }
 }
 
-// 4. 電腦視覺函式實作 
+// 幾何穩定性檢查
+function checkGeometricStability(contour, currentRect, currentArea) {
+    if (!lastStableRectData) return true; // 第一次偵測到，視為穩定
+
+    const prevCenter = lastStableRectData.center;
+    const currCenter = currentRect.center;
+
+    const centerDistance = Math.sqrt(
+        Math.pow(currCenter.x - prevCenter.x, 2) + 
+        Math.pow(currCenter.y - prevCenter.y, 2)
+    );
+    
+    const areaChangeRatio = Math.abs(currentArea - lastStableRectData.area) / lastStableRectData.area;
+
+    return centerDistance < MOVEMENT_THRESHOLD && areaChangeRatio < AREA_CHANGE_THRESHOLD;
+}
+
+
+// R5: 自動拍照功能 (透視變換的核心邏輯)
+function takeSnapshot(sourceMat, contour) {
+    
+    // 1. 停止相機串流
+    if (video.srcObject) {
+        video.srcObject.getTracks().forEach(track => track.stop());
+        video.srcObject = null;
+    }
+
+    statusDiv.innerHTML = '處理中，正在進行名片裁切...';
+
+    let srcTri = null;
+    let dstTri = null;
+    let M = null;
+    let correctedCard = null;
+
+    try {
+        // 取得名片四個頂點並進行魯棒排序 (TL, TR, BR, BL)
+        let pointsArray = [];
+        for (let i = 0; i < contour.rows; ++i) {
+            pointsArray.push({ x: contour.data32S[i * 2], y: contour.data32S[i * 2 + 1] });
+        }
+        const points_xy_sorted = [...pointsArray].sort((a, b) => (a.x + a.y) - (b.x + b.y));
+        const pt_tl = points_xy_sorted[0]; 
+        const pt_br = points_xy_sorted[3]; 
+        const pt_mid_1 = points_xy_sorted[1];
+        const pt_mid_2 = points_xy_sorted[2];
+        const pt_tr = pt_mid_1.x > pt_mid_2.x ? pt_mid_1 : pt_mid_2;
+        const pt_bl = pt_mid_1.x < pt_mid_2.x ? pt_mid_1 : pt_mid_2;
+        const finalPoints = [pt_tl, pt_tr, pt_br, pt_bl];
+
+        srcTri = cv.matFromArray(4, 1, cv.CV_32FC2, [
+            finalPoints[0].x, finalPoints[0].y, finalPoints[1].x, finalPoints[1].y, 
+            finalPoints[2].x, finalPoints[2].y, finalPoints[3].x, finalPoints[3].y
+        ]);
+
+        let width = Math.round(Math.sqrt(Math.pow(pt_tr.x - pt_tl.x, 2) + Math.pow(pt_tr.y - pt_tl.y, 2)));
+        let height = Math.round(Math.sqrt(Math.pow(pt_bl.x - pt_tl.x, 2) + Math.pow(pt_bl.y - pt_tl.y, 2)));
+        
+        if (width < 100 || height < 100) throw new Error("校正尺寸過小或無效");
+
+        dstTri = cv.matFromArray(4, 1, cv.CV_32FC2, [
+            0, 0, width, 0, width, height, 0, height
+        ]);
+
+        // 執行透視變換
+        M = cv.getPerspectiveTransform(srcTri, dstTri);
+        let dsize = new cv.Size(width, height);
+        correctedCard = new cv.Mat();
+        cv.warpPerspective(sourceMat, correctedCard, M, dsize, cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar());
+
+        // 顯示結果
+        canvasBuffer.width = width;
+        canvasBuffer.height = height; 
+        cv.imshow(canvasBuffer, correctedCard); 
+        snapshotImage.src = canvasBuffer.toDataURL('image/png'); 
+
+        // 隱藏預覽 Canvas，顯示結果容器 (R5)
+        canvasOutput.style.display = 'none'; 
+        snapshotContainer.style.display = 'flex'; 
+
+        statusDiv.innerHTML = '自動拍攝完成，名片已精準校正。';
+
+    } catch (error) {
+        console.error("DIAG ERROR: 拍照/裁切處理失敗，正在重設：", error);
+        statusDiv.innerHTML = `錯誤：名片處理失敗 (原因：${error.message})。請點擊「重新拍攝」重試。`;
+        resetAndStartCamera(); 
+
+    } finally {
+        // 釋放記憶體
+        if (srcTri) srcTri.delete();
+        if (dstTri) dstTri.delete();
+        if (M) M.delete();
+        if (correctedCard) correctedCard.delete();
+        cleanupOpenCVMats();
+    }
+}
+
+
+// ----------------------------------------------------------------
+// 輔助函式 (偵測、繪製、清理、下載、重設)
+// ----------------------------------------------------------------
+
+// 清理 OpenCV Mat 物件以避免記憶體洩漏
+function cleanupOpenCVMats() {
+     if (src && !src.isDeleted()) { src.delete(); src = null; }
+     if (dst && !dst.isDeleted()) { dst.delete(); dst = null; }
+}
+
+// 重新拍攝 (從結果頁面回到預覽/偵測)
+function resetAndStartCamera() {
+    autoCaptureInProgress = false;
+    snapshotContainer.style.display = 'none'; // 隱藏結果
+    canvasOutput.style.display = 'block';     // 顯示預覽
+    cleanupOpenCVMats();
+    startCamera();
+}
+
+// 下載圖片
+function downloadSnapshotImage() {
+    const img = document.getElementById('snapshotImage');
+    const a = document.createElement('a');
+    a.href = img.src;
+    a.download = 'business_card_corrected.png';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+}
+
+// 4. 電腦視覺函式實作 (與上次版本一致)
 function detectCardBoundary(inputMat) {
     let gray = new cv.Mat();
     let blur = new cv.Mat();
@@ -371,7 +423,6 @@ function detectCardBoundary(inputMat) {
     }
 }
 
-// 判斷名片是否穩定和清晰的簡單邏輯 (無變動)
 function isCardStableAndClear(contour) {
     if (!contour) return false;
     
@@ -379,37 +430,27 @@ function isCardStableAndClear(contour) {
     let totalArea = src.cols * src.rows; 
     
     // 條件 1: 面積檢查 (5% 到 85%)
-    if (area < totalArea * 0.05 || area > totalArea * 0.85) { 
-        return false;
-    }
+    if (area < totalArea * 0.05 || area > totalArea * 0.85) return false;
 
     // 條件 2: 凸性檢查
     let isConvex = cv.isContourConvex(contour);
-    if (!isConvex) {
-        return false;
-    }
+    if (!isConvex) return false;
     
     // 條件 3: 長寬比檢查
     let rect = cv.minAreaRect(contour);
     let size = rect.size;
     let width = size.width;
     let height = size.height;
-
     rect.delete(); 
 
-    if (width < height) {
-        [width, height] = [height, width];
-    }
+    if (width < height) [width, height] = [height, width];
     
     let aspectRatio = width / height;
-    if (aspectRatio < 1.3 || aspectRatio > 2.5) { 
-        return false;
-    }
+    if (aspectRatio < 1.3 || aspectRatio > 2.5) return false;
 
     return true; 
 }
 
-// 在影像上繪製輪廓 (無變動)
 function drawContour(outputMat, contour, color, thickness) {
     let contours = new cv.MatVector();
     contours.push_back(contour);
@@ -425,112 +466,8 @@ function drawContour(outputMat, contour, color, thickness) {
     contours.delete();
 }
 
-// 拍照功能 (透視變換的核心邏輯)
-function takeSnapshot(sourceMat, contour) {
-    // 1. 立即停止串流並更新狀態 (確保資源釋放)
-    streaming = false;
-    statusDiv.innerHTML = '處理中，請稍候...';
-    if (video.srcObject) {
-        video.srcObject.getTracks().forEach(track => track.stop());
-        video.srcObject = null;
-    }
-
-    let srcTri = null;
-    let dstTri = null;
-    let M = null;
-    let correctedCard = null;
-
-    try {
-        // 1. 取得名片四個頂點並進行魯棒排序
-        let pointsArray = [];
-        for (let i = 0; i < contour.rows; ++i) {
-            pointsArray.push({
-                x: contour.data32S[i * 2],
-                y: contour.data32S[i * 2 + 1]
-            });
-        }
-        
-        // 魯棒排序方法：確保點的順序為：TL, TR, BR, BL
-        const points_xy_sorted = [...pointsArray].sort((a, b) => (a.x + a.x) - (b.x + b.y)); // x+y 總和排序
-        const pt_tl = points_xy_sorted[0]; 
-        const pt_br = points_xy_sorted[3]; 
-
-        const pt_mid_1 = points_xy_sorted[1];
-        const pt_mid_2 = points_xy_sorted[2];
-
-        // 根據 x 座標區分 TR 和 BL
-        const pt_tr = pt_mid_1.x > pt_mid_2.x ? pt_mid_1 : pt_mid_2;
-        const pt_bl = pt_mid_1.x < pt_mid_2.x ? pt_mid_1 : pt_mid_2;
-
-        const finalPoints = [pt_tl, pt_tr, pt_br, pt_bl];
-
-        // 2. 準備透視變換的來源和目標點
-        srcTri = cv.matFromArray(4, 1, cv.CV_32FC2, [
-            finalPoints[0].x, finalPoints[0].y, // TL
-            finalPoints[1].x, finalPoints[1].y, // TR
-            finalPoints[2].x, finalPoints[2].y, // BR
-            finalPoints[3].x, finalPoints[3].y  // BL
-        ]);
-
-        // 計算名片校正後的大小
-        let width = Math.sqrt(Math.pow(pt_tr.x - pt_tl.x, 2) + Math.pow(pt_tr.y - pt_tl.y, 2));
-        let height = Math.sqrt(Math.pow(pt_bl.x - pt_tl.x, 2) + Math.pow(pt_bl.y - pt_tl.y, 2));
-        
-        width = Math.round(width);
-        height = Math.round(height);
-
-        if (width < 100 || height < 100) {
-            throw new Error("校正尺寸過小或無效 (W:" + width + " H:" + height + ")");
-        }
-
-
-        // 目標矩形點 (校正後的影像會變成這個大小)
-        dstTri = cv.matFromArray(4, 1, cv.CV_32FC2, [
-            0, 0,
-            width, 0,
-            width, height,
-            0, height
-        ]);
-
-        // 3. 執行透視變換
-        M = cv.getPerspectiveTransform(srcTri, dstTri);
-        let dsize = new cv.Size(width, height);
-        correctedCard = new cv.Mat();
-        cv.warpPerspective(sourceMat, correctedCard, M, dsize, cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar());
-
-        // 4. 將校正後的圖片顯示到 img 標籤 
-        // 使用 canvasBuffer 進行渲染，然後將其內容轉為 Data URL 賦予給 img 標籤
-        canvasBuffer.width = width;
-        canvasBuffer.height = height; // 調整緩衝 Canvas 尺寸以匹配校正後的卡片尺寸
-        cv.imshow(canvasBuffer, correctedCard); // 渲染到隱藏的緩衝 Canvas
-        snapshotImage.src = canvasBuffer.toDataURL('image/png'); // 將 Canvas 內容轉為圖片 URL
-
-        // 隱藏預覽 Canvas，顯示結果
-        canvasOutput.style.display = 'none'; 
-        snapshotContainer.style.display = 'flex'; // 使用 flex 讓內容居中
-
-        statusDiv.innerHTML = '拍攝完成，已自動校正。';
-        console.log("DIAG: 快照已拍攝，透視變換完成並顯示。");
-
-
-    } catch (error) {
-        console.error("DIAG ERROR: 拍照處理失敗，正在重設：", error);
-        
-        statusDiv.innerHTML = `錯誤：名片處理失敗 (原因：${error.message})。請重試並確認名片邊緣清晰。`;
-        
-        resetAndStartCamera(); 
-
-    } finally {
-        // 釋放記憶體
-        if (srcTri && !srcTri.isDeleted()) srcTri.delete();
-        if (dstTri && !dstTri.isDeleted()) dstTri.delete();
-        if (M && !M.isDeleted()) M.delete();
-        if (correctedCard && !correctedCard.isDeleted()) correctedCard.delete();
-    }
-}
-
 // ----------------------------------------------------------------
-// 載入完成通知 (FIXED LOGIC)
+// 載入完成通知 (時序修正)
 // ----------------------------------------------------------------
 
 // 腳本載入完成，設定旗標 B 並呼叫檢查函式
@@ -539,7 +476,7 @@ console.log("DIAG: app.js 載入完成 (旗標 B 設置)。");
 if (typeof checkInitialization === 'function') {
     checkInitialization();
 } else {
-    // 這是極端情況，如果 checkInitialization 尚未定義，則延遲檢查 (不太可能發生，但作為防禦性編程)
+    // 防禦性編程：如果 checkInitialization 尚未定義，則延遲檢查
     setTimeout(() => {
         if (typeof checkInitialization === 'function') {
             checkInitialization();
