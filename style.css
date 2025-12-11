@@ -1,52 +1,58 @@
-/* 確保 body 佔滿整個視窗高度 */
+/* 設置全螢幕模式和字體 */
 html, body {
     height: 100%;
+    margin: 0;
+    font-family: 'Inter', sans-serif;
 }
 
-/* 確保 video 和 canvas 100% 寬度並保持長寬比，隱藏 video 標籤 */
-#video {
-    display: none;
-}
-
-/* 讓 canvas 填滿其容器 */
-#canvasOutput {
-    width: 100%;
-    height: 100%;
-    object-fit: contain; /* 確保內容完整顯示 */
-    border-radius: 0.5rem;
-}
-
-/* 結果顯示容器 - 讓其佔滿空間並覆蓋預覽區 */
-#snapshotContainer {
-    display: none; /* 預設在 JS 啟動前隱藏 */
-    width: 100%;
-    height: 100%;
-    position: absolute;
-    inset: 0;
-    display: flex; /* 讓 JS 顯示時使用 Flex 佈局 */
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 1rem;
-    background-color: #0d121c; 
-    z-index: 10;
-}
-
-#snapshotImage {
-    max-width: 100%;
-    max-height: 75vh; /* 限制高度以確保按鈕有空間 */
-    height: auto;
-    border: 2px solid #3b82f6;
-    border-radius: 0.75rem;
-    box-shadow: 0 10px 15px rgba(0, 0, 0, 0.5);
-    object-fit: contain;
-}
-
-/* 調整主要內容區域在小螢幕上的佈局，佔用大部分高度 (解決 iPhone 畫面不合適問題) */
+/* 確保主容器在小螢幕上可以滾動（如果內容溢出），並居中顯示 */
 .main-container {
-    width: 100%;
-    max-width: 500px; /* 限制寬度在桌面模式 */
-    height: 90vh; /* 在移動設備上佔用大部分高度，確保內容垂直填充 */
+    max-width: 900px;
+    width: 98vw;
+    height: 98vh;
     display: flex;
     flex-direction: column;
+    overflow-y: auto;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+}
+
+/* 確保影片和 Canvas 容器佔用可用空間 */
+.video-canvas-container {
+    flex-grow: 1;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    position: relative;
+    width: 100%;
+    overflow: hidden; /* 防止視訊溢出 */
+}
+
+/* 影片元素保持隱藏，只用於擷取幀 */
+#video {
+    position: absolute;
+    width: 100%; 
+    height: 100%;
+    object-fit: contain; /* 確保內容可見 */
+    opacity: 0;
+    pointer-events: none;
+}
+
+/* 讓 Canvas 在容器內保持最大的可見尺寸 */
+#canvasOutput, #snapshotImage {
+    max-width: 100%;
+    max-height: 100%;
+    width: auto;
+    height: auto;
+    display: block;
+    margin: auto;
+}
+
+/* 拍照結果容器，使其垂直居中 */
+#snapshotContainer {
+    display: none; /* 預設隱藏 */
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    width: 100%;
+    height: 100%;
 }
