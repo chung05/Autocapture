@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>OpenCV.js 名片掃描器</title>
-    <!-- 載入 OpenCV.js 核心庫 -->
-    <script async src="https://docs.opencv.org/4.9.0/opencv.js" onload="onOpenCvReady();"></script>
+    <!-- 載入 OpenCV.js 核心庫，新增 onerror 處理以捕獲網路載入錯誤 -->
+    <script async src="https://docs.opencv.org/4.9.0/opencv.js" onload="onOpenCvReady();" onerror="onOpenCvError();"></script>
     <style>
         /* 基礎樣式和響應式設計 */
         body {
@@ -197,9 +197,15 @@
         let timeoutContainer = null;
         let timeoutRetryButton = null;
 
+        // OpenCV 載入失敗的回調函數 (新增)
+        function onOpenCvError() {
+            document.getElementById('status').innerHTML = '致命錯誤：OpenCV.js 檔案無法載入。請檢查您的網路連線或稍後重試。';
+            console.error('DIAG ERROR: OpenCV.js resource failed to load from CDN.');
+        }
+
         // OpenCV 載入完成的回調函數
         function onOpenCvReady() {
-            if (cv.Mat) {
+            if (cv && cv.Mat) {
                 // 延遲初始化，確保 DOM 結構已準備好
                 setTimeout(initAppWithOpenCV, 100);
             } else {
