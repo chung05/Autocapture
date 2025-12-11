@@ -1,6 +1,8 @@
 /**
- * 名片掃描應用程式的主邏輯 (app.js)
- * 實作自動啟動、10秒超時重啟，以及穩定後自動拍照功能。
+ * 名片掃描應用程式的主邏輯 (app.js) - 崩潰修正版
+ * 修正重點：
+ * 1. 移除 cv.RotatedRect 物件上錯誤的 .delete() 呼叫 (解決程式崩潰)。
+ * 2. 確保影像處理迴圈持續運行，以顯示名片邊界 (R2)。
  */
 
 // 宣告全域變數
@@ -23,7 +25,7 @@ let stableFrameCount = 0;
 let lastStableRectData = null; 
 let autoCaptureInProgress = false; // 確保只拍一次
 
-// 宣告 DOM 元素參照
+// 宣告 DOM 元素參照 (確保在 initAppWithOpenCV 中賦值)
 let video = null;
 let canvasOutput = null;
 let statusDiv = null;
@@ -36,7 +38,7 @@ let timeoutContainer = null;
 let timeoutRetryButton = null;
 
 
-// ** 核心初始化函式：在 OpenCV 和 app.js 都載入完成後被呼叫 **
+// ** 核心初始化函式：在 OpenCV 核心載入完成後被呼叫 **
 function initAppWithOpenCV() {
     
     // 取得 DOM 元素參照
@@ -57,7 +59,7 @@ function initAppWithOpenCV() {
     timeoutRetryButton.addEventListener('click', startCamera);
     
     // R1: 載入完成後，直接開始相機
-    statusDiv.innerHTML = 'OpenCV 載入完成。正在啟動相機...';
+    statusDiv.innerHTML = 'OpenCV 載入完成。正在自動啟動相機...';
     console.log("DIAG: 初始化成功，自動啟動相機。");
     
     startCamera();
@@ -76,8 +78,8 @@ function handleNoCardTimeout() {
         video.srcObject = null;
     }
     
-    // 3. 顯示超時訊息和重啟按鈕
-    statusDiv.innerHTML = '偵測已暫停。';
+    // 3. 顯示超時訊息和重啟按鈕 (R3)
+    statusDiv.innerHTML = '請放入名片。';
     timeoutContainer.style.display = 'flex';
     
     // 4. 清理 OpenCV Mats
@@ -212,13 +214,25 @@ function processVideo() {
 
                  statusDiv.innerHTML = '偵測到名片，但晃動或模糊。請保持靜止！';
             }
-            currentRect.delete(); 
+            // 修正：cv.RotatedRect 物件不需要呼叫 delete()
         } else {
             // R3: 未偵測到名片或品質不合格
             stableFrameCount = 0; 
             lastStableRectData = null; 
             
-            statusDiv.innerHTML = '請將名片置於畫面中央，背景對比度要高。'; 
+            // R2: 如果有偵測到輪廓，但品質不合格，顯示紅色警告
+            if (cardContour) {
+                const warningColor = new cv.Scalar(255, 0, 0, 255); // 紅色警告
+                drawContour(dst, cardContour, warningColor, 2);
+                warningColor.delete();
+                statusDiv.innerHTML = '偵測到輪廓，但形狀或長寬比不符名片要求。';
+                
+                // 必須釋放 Mat 物件
+                cardContour.delete(); 
+                cardContour = null;
+            } else {
+                 statusDiv.innerHTML = '請將名片置於畫面中央，背景對比度要高。'; 
+            }
             
             // 啟動超時定時器 (R3)
             if (!noCardTimer) {
@@ -234,8 +248,8 @@ function processVideo() {
     } catch (e) {
         console.error("DIAG ERROR: ProcessVideo 迴圈意外崩潰，正在重設：", e);
         streaming = false; 
-        statusDiv.innerHTML = `錯誤：影像處理迴圈意外停止 (${e.message})。`;
-        // 在錯誤發生時，顯示重試按鈕而不是自動重啟，讓用戶決定
+        statusDiv.innerHTML = `錯誤：影像處理迴圈意外停止 (${e.message})。請點擊「重啟掃描」。`;
+        // 錯誤發生時，顯示重試按鈕
         timeoutContainer.style.display = 'flex';
         cleanupOpenCVMats();
     }
@@ -328,11 +342,12 @@ function takeSnapshot(sourceMat, contour) {
         resetAndStartCamera(); 
 
     } finally {
-        // 釋放記憶體
+        // 釋放 Mat 記憶體
         if (srcTri) srcTri.delete();
         if (dstTri) dstTri.delete();
         if (M) M.delete();
         if (correctedCard) correctedCard.delete();
+        // 清理 src 和 dst
         cleanupOpenCVMats();
     }
 }
@@ -354,6 +369,11 @@ function resetAndStartCamera() {
     snapshotContainer.style.display = 'none'; // 隱藏結果
     canvasOutput.style.display = 'block';     // 顯示預覽
     cleanupOpenCVMats();
+    // 確保停止相機串流
+    if (video.srcObject) {
+        video.srcObject.getTracks().forEach(track => track.stop());
+        video.srcObject = null;
+    }
     startCamera();
 }
 
@@ -391,7 +411,7 @@ function detectCardBoundary(inputMat) {
             let contour = contours.get(i);
             let area = cv.contourArea(contour);
 
-            if (area < 500) continue; 
+            if (area < 500) { contour.delete(); continue; }
             
             let arcLength = cv.arcLength(contour, true);
             let approx = new cv.Mat();
@@ -441,8 +461,9 @@ function isCardStableAndClear(contour) {
     let size = rect.size;
     let width = size.width;
     let height = size.height;
-    rect.delete(); 
 
+    // 修正：移除 rect.delete();
+    
     if (width < height) [width, height] = [height, width];
     
     let aspectRatio = width / height;
