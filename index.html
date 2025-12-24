@@ -3,198 +3,58 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>智能名片掃描器</title>
-    
-    <!-- 載入 OpenCV.js -->
+    <title>智能名片掃描器-強效版</title>
     <script async src="https://docs.opencv.org/4.9.0/opencv.js"></script>
-
     <style>
-        :root {
-            --primary: #10b981;
-            --bg: #0f172a;
-            --text: #f8fafc;
-        }
-
+        :root { --primary: #10b981; --bg: #0f172a; --text: #f8fafc; }
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-
-        body {
-            font-family: -apple-system, system-ui, sans-serif;
-            background-color: var(--bg);
-            color: var(--text);
-            margin: 0;
-            padding: 0;
-            overflow: hidden;
-            display: flex;
-            flex-direction: column;
-            height: 100vh;
-        }
-
-        .header {
-            padding: 15px;
-            text-align: center;
-            background: rgba(30, 41, 59, 0.8);
-            backdrop-filter: blur(10px);
-            z-index: 10;
-        }
-
-        h1 { margin: 0; font-size: 1.1rem; color: var(--primary); }
-
-        .scanner-container {
-            position: relative;
-            flex: 1;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            background: #000;
-        }
-
-        #video { display: none; }
+        body { font-family: sans-serif; background: var(--bg); color: var(--text); margin: 0; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+        .header { padding: 12px; text-align: center; background: rgba(30, 41, 59, 0.9); z-index: 10; border-bottom: 1px solid rgba(255,255,255,0.1); }
+        h1 { margin: 0; font-size: 0.9rem; color: var(--primary); text-transform: uppercase; letter-spacing: 1px; }
+        .scanner-container { position: relative; flex: 1; background: #000; display: flex; justify-content: center; align-items: center; }
         #canvasOutput { width: 100%; height: 100%; object-fit: contain; }
-
-        .overlay {
-            position: absolute;
-            bottom: 40px;
-            left: 0;
-            right: 0;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            pointer-events: none;
-        }
-
-        .status-badge {
-            background: rgba(0, 0, 0, 0.8);
-            padding: 10px 20px;
-            border-radius: 25px;
-            font-size: 0.95rem;
-            border: 2px solid rgba(255, 255, 255, 0.2);
-            margin-bottom: 12px;
-            transition: all 0.3s;
-        }
-
-        .status-badge.stable {
-            border-color: var(--primary);
-            color: var(--primary);
-            box-shadow: 0 0 20px rgba(16, 185, 129, 0.5);
-        }
-
-        .progress-bar {
-            width: 220px;
-            height: 6px;
-            background: rgba(255, 255, 255, 0.2);
-            border-radius: 3px;
-            overflow: hidden;
-            display: none;
-        }
-
-        #progressFill {
-            height: 100%;
-            width: 0%;
-            background: var(--primary);
-            transition: width 0.1s linear;
-        }
-
-        #loadingScreen {
-            position: fixed;
-            inset: 0;
-            background: var(--bg);
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            z-index: 100;
-        }
-
-        .spinner {
-            width: 45px; height: 45px;
-            border: 5px solid rgba(16, 185, 129, 0.2);
-            border-top: 5px solid var(--primary);
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-            margin-bottom: 15px;
-        }
-
+        #video { display: none; }
+        .overlay { position: absolute; bottom: 30px; left: 0; right: 0; display: flex; flex-direction: column; align-items: center; pointer-events: none; }
+        .status-badge { background: rgba(0, 0, 0, 0.85); padding: 12px 24px; border-radius: 30px; font-size: 0.9rem; border: 2px solid rgba(255, 255, 255, 0.15); margin-bottom: 10px; transition: all 0.3s; }
+        .status-badge.stable { border-color: var(--primary); color: var(--primary); box-shadow: 0 0 20px rgba(16, 185, 129, 0.4); transform: scale(1.05); }
+        .progress-bar { width: 200px; height: 6px; background: rgba(255,255,255,0.2); border-radius: 3px; overflow: hidden; display: none; }
+        #progressFill { height: 100%; width: 0%; background: var(--primary); transition: width 0.1s linear; }
+        #loadingScreen { position: fixed; inset: 0; background: var(--bg); display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 100; }
+        .spinner { width: 40px; height: 40px; border: 4px solid rgba(16,185,129,0.2); border-top: 4px solid var(--primary); border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 15px; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-
-        #resultView {
-            position: fixed;
-            inset: 0;
-            background: var(--bg);
-            z-index: 50;
-            display: none;
-            flex-direction: column;
-            padding: 20px;
-            overflow-y: auto;
-        }
-
-        .result-card {
-            background: #1e293b;
-            padding: 12px;
-            border-radius: 12px;
-            margin-top: 20px;
-        }
-
-        #resultImg { width: 100%; height: auto; border-radius: 8px; }
-
-        .action-btns { display: flex; gap: 15px; margin-top: 25px; }
-
-        button {
-            flex: 1;
-            padding: 16px;
-            border-radius: 12px;
-            border: none;
-            font-size: 1rem;
-            font-weight: 600;
-            cursor: pointer;
-        }
-
+        #resultView { position: fixed; inset: 0; background: var(--bg); z-index: 50; display: none; flex-direction: column; padding: 20px; }
+        .result-card { background: #1e293b; padding: 8px; border-radius: 12px; margin-top: 10px; text-align: center; flex: 1; display: flex; align-items: center; justify-content: center; }
+        #resultImg { max-width: 100%; max-height: 70vh; border-radius: 4px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        .action-btns { display: flex; gap: 12px; margin-top: 20px; padding-bottom: 20px; }
+        button { flex: 1; padding: 18px; border-radius: 14px; border: none; font-weight: bold; font-size: 1rem; cursor: pointer; }
         .btn-save { background: var(--primary); color: white; }
         .btn-retry { background: #475569; color: white; }
     </style>
 </head>
 <body>
-
-    <div id="loadingScreen">
-        <div class="spinner"></div>
-        <div>影像引擎初始化中...</div>
-    </div>
-
-    <div class="header">
-        <h1>智能名片掃描</h1>
-    </div>
-
+    <div id="loadingScreen"><div class="spinner"></div><div>正在優化影像演算法...</div></div>
+    <div class="header"><h1>智能名片掃描 (反光與圓角加強版)</h1></div>
     <div class="scanner-container">
         <video id="video" playsinline></video>
         <canvas id="canvasOutput"></canvas>
-        
         <div class="overlay">
-            <div id="statusBadge" class="status-badge">請將名片置於深色背景上...</div>
-            <div id="progressContainer" class="progress-bar">
-                <div id="progressFill"></div>
-            </div>
+            <div id="statusBadge" class="status-badge">將名片移入鏡頭...</div>
+            <div id="progressContainer" class="progress-bar"><div id="progressFill"></div></div>
         </div>
     </div>
-
     <div id="resultView">
-        <h2 style="text-align:center; font-size: 1.2rem;">掃描結果</h2>
-        <div class="result-card">
-            <img id="resultImg" src="" alt="掃描結果">
-        </div>
+        <div class="result-card"><img id="resultImg" src=""></div>
         <div class="action-btns">
             <button class="btn-retry" onclick="restartScan()">重新拍攝</button>
-            <button class="btn-save" onclick="downloadResult()">儲存圖片</button>
+            <button class="btn-save" onclick="downloadResult()">保存到相簿</button>
         </div>
     </div>
-
     <canvas id="canvasBuffer" style="display:none;"></canvas>
 
     <script>
         let video, canvasOutput, ctxOutput, canvasBuffer, statusBadge, progressFill, progressContainer;
-        let streaming = false;
-        let stableCount = 0;
-        const STABLE_THRESHOLD = 20; // 略微調快拍照速度
-        let lastRect = null;
-        let scanActive = true;
+        let streaming = false, stableCount = 0, lastRect = null, scanActive = true;
+        const STABLE_REQ = 18; // 稍微提高採樣頻率
 
         function init() {
             video = document.getElementById('video');
@@ -204,16 +64,14 @@
             statusBadge = document.getElementById('statusBadge');
             progressFill = document.getElementById('progressFill');
             progressContainer = document.getElementById('progressContainer');
-            checkOpenCV();
+            checkCV();
         }
 
-        function checkOpenCV() {
+        function checkCV() {
             if (typeof cv !== 'undefined' && cv.Mat) {
                 document.getElementById('loadingScreen').style.display = 'none';
                 startCamera();
-            } else {
-                setTimeout(checkOpenCV, 200);
-            }
+            } else { setTimeout(checkCV, 200); }
         }
 
         async function startCamera() {
@@ -222,193 +80,171 @@
                     video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } }
                 });
                 video.srcObject = stream;
-                video.onloadedmetadata = () => {
-                    video.play();
-                    streaming = true;
-                    requestAnimationFrame(processLoop);
-                };
-            } catch (err) {
-                alert("無法存取相機，請檢查權限。");
-            }
+                video.onloadedmetadata = () => { video.play(); streaming = true; requestAnimationFrame(processLoop); };
+            } catch (err) { alert("相機啟動失敗。"); }
         }
 
         function processLoop() {
             if (!streaming || !scanActive) return;
-
             if (canvasOutput.width !== video.videoWidth) {
                 canvasOutput.width = video.videoWidth;
                 canvasOutput.height = video.videoHeight;
             }
-
             ctxOutput.drawImage(video, 0, 0, canvasOutput.width, canvasOutput.height);
 
             let src = cv.imread(canvasOutput);
-            let gray = new cv.Mat();
-            let blurred = new cv.Mat();
-            let edged = new cv.Mat();
-
+            let gray = new cv.Mat(), binary = new cv.Mat(), morphed = new cv.Mat();
+            
+            // 1. 影像增強：灰階化
             cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-            // 降低模糊程度，保留更多邊緣細節
-            cv.GaussianBlur(gray, blurred, new cv.Size(3, 3), 0);
-            // 放寬 Canny 閾值以捕捉較弱的邊緣 (50, 150)
-            cv.Canny(blurred, edged, 50, 150);
+            
+            // 2. 改進點：使用自適應二值化處理反光
+            cv.adaptiveThreshold(gray, binary, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY_INV, 11, 2);
+            
+            // 3. 改進點：形態學運算 (閉合運算) 填補圓角處的微小斷裂
+            let M_kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(5, 5));
+            cv.morphologyEx(binary, morphed, cv.MORPH_CLOSE, M_kernel);
 
-            let contours = new cv.MatVector();
-            let hierarchy = new cv.Mat();
-            cv.findContours(edged, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+            let contours = new cv.MatVector(), hierarchy = new cv.Mat();
+            cv.findContours(morphed, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
-            let cardContour = null;
-            let maxArea = 0;
+            let bestCard = null, maxArea = 0;
+            const viewArea = src.rows * src.cols;
 
             for (let i = 0; i < contours.size(); ++i) {
                 let cnt = contours.get(i);
                 let area = cv.contourArea(cnt);
-                
-                // 提高偵測靈敏度：佔畫面 8% 即可
-                if (area > (src.rows * src.cols * 0.08)) {
-                    let peri = cv.arcLength(cnt, true);
-                    let approx = new cv.Mat();
-                    cv.approxPolyDP(cnt, approx, 0.02 * peri, true);
+                if (area < viewArea * 0.1 || area > viewArea * 0.95) continue;
 
-                    if (approx.rows === 4) {
-                        if (area > maxArea) {
-                            maxArea = area;
-                            if (cardContour) cardContour.delete();
-                            cardContour = approx;
-                        } else {
-                            approx.delete();
-                        }
-                    } else {
-                        approx.delete();
-                    }
-                }
+                // 使用 Convex Hull 穩定形狀
+                let hull = new cv.Mat();
+                cv.convexHull(cnt, hull, false, true);
+                
+                let peri = cv.arcLength(hull, true);
+                let approx = new cv.Mat();
+                cv.approxPolyDP(hull, approx, 0.02 * peri, true);
+
+                // 容許 4~8 邊形（為了相容極圓的圓角）
+                if (approx.rows >= 4 && approx.rows <= 8) {
+                    let rect = cv.boundingRect(approx);
+                    let solidity = area / (rect.width * rect.height);
+                    
+                    // 檢查矩形程度 (Solidity)
+                    if (solidity > 0.65 && area > maxArea) {
+                        maxArea = area;
+                        if (bestCard) bestCard.delete();
+                        bestCard = simplifyToFourPoints(approx);
+                    } else { approx.delete(); }
+                } else { approx.delete(); }
+                hull.delete();
             }
 
-            if (cardContour) {
-                // 繪製線條 (已加粗)
-                drawDetectionLine(cardContour);
-                
-                if (checkStability(cardContour)) {
+            if (bestCard) {
+                renderOverlay(bestCard);
+                if (validateStability(bestCard)) {
                     stableCount++;
-                    statusBadge.innerText = "偵測成功！請保持不動...";
+                    statusBadge.innerText = "對準成功，請保持靜止...";
                     statusBadge.classList.add('stable');
                     progressContainer.style.display = 'block';
-                    progressFill.style.width = (stableCount / STABLE_THRESHOLD * 100) + '%';
-
-                    if (stableCount >= STABLE_THRESHOLD) {
-                        handleCapture(src, cardContour);
-                        cleanup([src, gray, blurred, edged, contours, hierarchy, cardContour]);
+                    progressFill.style.width = (stableCount / STABLE_REQ * 100) + '%';
+                    if (stableCount >= STABLE_REQ) {
+                        captureCard(src, bestCard);
+                        cleanup([src, gray, binary, morphed, contours, hierarchy, bestCard, M_kernel]);
                         return;
                     }
                 } else {
                     stableCount = 0;
-                    statusBadge.innerText = "對準名片中...";
+                    statusBadge.innerText = "找到名片，穩定中...";
                     statusBadge.classList.remove('stable');
-                    progressFill.style.width = '0%';
                 }
             } else {
                 stableCount = 0;
-                statusBadge.innerText = "請將名片置於深色背景上";
-                statusBadge.classList.remove('stable');
+                statusBadge.innerText = "正在尋找邊緣 (請避開強烈反光)";
                 progressContainer.style.display = 'none';
             }
 
-            cleanup([src, gray, blurred, edged, contours, hierarchy, cardContour]);
+            cleanup([src, gray, binary, morphed, contours, hierarchy, bestCard, M_kernel]);
             if (scanActive) requestAnimationFrame(processLoop);
         }
 
-        // 修改此處：調整線條粗細
-        function drawDetectionLine(contour) {
+        // 強制將偵測到的形狀映射到最外圍的四個角落
+        function simplifyToFourPoints(approx) {
+            let pts = [];
+            for (let i = 0; i < approx.rows; i++) {
+                pts.push({ x: approx.data32S[i*2], y: approx.data32S[i*2+1] });
+            }
+            // 排序演算法：找和最小(TL)、和最大(BR)、差最小(TR)、差最大(BL)
+            let sums = pts.map(p => p.x + p.y);
+            let diffs = pts.map(p => p.y - p.x);
+            
+            let tl = pts[sums.indexOf(Math.min(...sums))];
+            let br = pts[sums.indexOf(Math.max(...sums))];
+            let tr = pts[diffs.indexOf(Math.min(...diffs))];
+            let bl = pts[diffs.indexOf(Math.max(...diffs))];
+
+            let res = cv.matFromArray(4, 1, cv.CV_32S, [tl.x, tl.y, tr.x, tr.y, br.x, br.y, bl.x, bl.y]);
+            approx.delete();
+            return res;
+        }
+
+        function renderOverlay(cnt) {
             ctxOutput.strokeStyle = "#10b981";
-            ctxOutput.lineWidth = 10; // 從 6 增加到 10，讓線條更明顯
+            ctxOutput.lineWidth = 15; // 視覺強化
             ctxOutput.lineJoin = "round";
             ctxOutput.beginPath();
-            ctxOutput.moveTo(contour.data32S[0], contour.data32S[1]);
-            for (let i = 1; i < 4; i++) {
-                ctxOutput.lineTo(contour.data32S[i * 2], contour.data32S[i * 2 + 1]);
-            }
+            ctxOutput.moveTo(cnt.data32S[0], cnt.data32S[1]);
+            for (let i = 1; i < 4; i++) { ctxOutput.lineTo(cnt.data32S[i*2], cnt.data32S[i*2+1]); }
             ctxOutput.closePath();
             ctxOutput.stroke();
-
-            // 增加角落圓點大小
+            
+            // 繪製角落大型提示點
             ctxOutput.fillStyle = "#10b981";
             for (let i = 0; i < 4; i++) {
                 ctxOutput.beginPath();
-                ctxOutput.arc(contour.data32S[i * 2], contour.data32S[i * 2 + 1], 12, 0, Math.PI * 2); // 從 8 增加到 12
+                ctxOutput.arc(cnt.data32S[i*2], cnt.data32S[i*2+1], 18, 0, Math.PI*2);
                 ctxOutput.fill();
             }
         }
 
-        function checkStability(contour) {
-            let moments = cv.moments(contour);
-            let cx = moments.m10 / moments.m00;
-            let cy = moments.m01 / moments.m00;
-            let area = moments.m00;
-
-            if (!lastRect) {
-                lastRect = { cx, cy, area };
-                return false;
-            }
-
-            let dist = Math.hypot(cx - lastRect.cx, cy - lastRect.cy);
-            let areaDiff = Math.abs(area - lastRect.area) / lastRect.area;
-            lastRect = { cx, cy, area };
-
-            return dist < 8 && areaDiff < 0.03; // 稍微放寬穩定判定範圍
+        function validateStability(cnt) {
+            let m = cv.moments(cnt);
+            let cx = m.m10/m.m00, cy = m.m01/m.m00;
+            if (!lastRect) { lastRect = {cx, cy}; return false; }
+            let d = Math.hypot(cx - lastRect.cx, cy - lastRect.cy);
+            lastRect = {cx, cy};
+            return d < 6; // 嚴格的穩定度檢查
         }
 
-        function handleCapture(srcMat, contour) {
+        function captureCard(src, cnt) {
             scanActive = false;
-            let pts = [];
-            for (let i = 0; i < 4; i++) {
-                pts.push({ x: contour.data32S[i * 2], y: contour.data32S[i * 2 + 1] });
-            }
-            pts.sort((a, b) => a.y - b.y);
-            let top = pts.slice(0, 2).sort((a, b) => a.x - b.x);
-            let bot = pts.slice(2, 4).sort((a, b) => b.x - a.x);
-            let sorted = [top[0], top[1], bot[0], bot[1]];
-
-            let width = Math.max(Math.hypot(sorted[1].x - sorted[0].x, sorted[1].y - sorted[0].y),
-                                 Math.hypot(sorted[2].x - sorted[3].x, sorted[2].y - sorted[3].y));
-            let height = Math.max(Math.hypot(sorted[3].x - sorted[0].x, sorted[3].y - sorted[0].y),
-                                  Math.hypot(sorted[2].x - sorted[1].x, sorted[2].y - sorted[1].y));
-
-            let srcTri = cv.matFromArray(4, 1, cv.CV_32FC2, [
-                sorted[0].x, sorted[0].y, sorted[1].x, sorted[1].y,
-                sorted[2].x, sorted[2].y, sorted[3].x, sorted[3].y
-            ]);
-            let dstTri = cv.matFromArray(4, 1, cv.CV_32FC2, [0, 0, width, 0, width, height, 0, height]);
-
-            let M = cv.getPerspectiveTransform(srcTri, dstTri);
+            let p = [
+                {x: cnt.data32S[0], y: cnt.data32S[1]}, {x: cnt.data32S[2], y: cnt.data32S[3]},
+                {x: cnt.data32S[4], y: cnt.data32S[5]}, {x: cnt.data32S[6], y: cnt.data32S[7]}
+            ];
+            // 計算裁切尺寸
+            let w = Math.max(Math.hypot(p[1].x-p[0].x, p[1].y-p[0].y), Math.hypot(p[2].x-p[3].x, p[2].y-p[3].y));
+            let h = Math.max(Math.hypot(p[3].x-p[0].x, p[3].y-p[0].y), Math.hypot(p[2].x-p[1].x, p[2].y-p[1].y));
+            
+            let sTri = cv.matFromArray(4, 1, cv.CV_32FC2, [p[0].x, p[0].y, p[1].x, p[1].y, p[2].x, p[2].y, p[3].x, p[3].y]);
+            let dTri = cv.matFromArray(4, 1, cv.CV_32FC2, [0, 0, w, 0, w, h, 0, h]);
+            let M = cv.getPerspectiveTransform(sTri, dTri);
             let result = new cv.Mat();
-            cv.warpPerspective(srcMat, result, M, new cv.Size(width, height), cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar());
+            cv.warpPerspective(src, result, M, new cv.Size(w, h));
 
             cv.imshow(canvasBuffer, result);
             document.getElementById('resultImg').src = canvasBuffer.toDataURL('image/png');
             document.getElementById('resultView').style.display = 'flex';
-
-            srcTri.delete(); dstTri.delete(); M.delete(); result.delete();
+            sTri.delete(); dTri.delete(); M.delete(); result.delete();
         }
 
-        function cleanup(mats) {
-            mats.forEach(m => { if (m && !m.isDeleted()) m.delete(); });
+        function cleanup(mats) { mats.forEach(m => { if(m && !m.isDeleted()) m.delete(); }); }
+        function restartScan() { document.getElementById('resultView').style.display='none'; scanActive=true; stableCount=0; lastRect=null; requestAnimationFrame(processLoop); }
+        function downloadResult() { 
+            const a = document.createElement('a'); 
+            a.download=`Card_Scan_${Date.now()}.png`; 
+            a.href=document.getElementById('resultImg').src; 
+            a.click(); 
         }
-
-        function restartScan() {
-            document.getElementById('resultView').style.display = 'none';
-            scanActive = true;
-            stableCount = 0;
-            lastRect = null;
-            requestAnimationFrame(processLoop);
-        }
-
-        function downloadResult() {
-            const link = document.createElement('a');
-            link.download = `Card_${Date.now()}.png`;
-            link.href = document.getElementById('resultImg').src;
-            link.click();
-        }
-
         window.onload = init;
     </script>
 </body>
