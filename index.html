@@ -379,7 +379,7 @@
         // 繪製綠色偵測框
         function drawDetectionLine(contour) {
             ctxOutput.strokeStyle = "#10b981";
-            ctxOutput.lineWidth = 6;
+            ctxOutput.lineWidth = 12;  // 從 6 增加到 10，讓線條更明顯
             ctxOutput.lineJoin = "round";
             ctxOutput.beginPath();
             ctxOutput.moveTo(contour.data32S[0], contour.data32S[1]);
@@ -393,7 +393,7 @@
             ctxOutput.fillStyle = "#10b981";
             for (let i = 0; i < 4; i++) {
                 ctxOutput.beginPath();
-                ctxOutput.arc(contour.data32S[i * 2], contour.data32S[i * 2 + 1], 8, 0, Math.PI * 2);
+                ctxOutput.arc(contour.data32S[i * 2], contour.data32S[i * 2 + 1], 16, 0, Math.PI * 2);
                 ctxOutput.fill();
             }
         }
@@ -489,3 +489,4 @@
     </script>
 </body>
 </html>
+
