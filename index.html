@@ -11,16 +11,11 @@
     <style>
         :root {
             --primary: #10b981;
-            --secondary: #3b82f6;
-            --danger: #ef4444;
             --bg: #0f172a;
             --text: #f8fafc;
         }
 
-        * {
-            box-sizing: border-box;
-            -webkit-tap-highlight-color: transparent;
-        }
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
         body {
             font-family: -apple-system, system-ui, sans-serif;
@@ -28,13 +23,12 @@
             color: var(--text);
             margin: 0;
             padding: 0;
-            overflow: hidden; /* 防止手機瀏覽器震動滾動 */
+            overflow: hidden;
             display: flex;
             flex-direction: column;
             height: 100vh;
         }
 
-        /* 頂部導航 */
         .header {
             padding: 15px;
             text-align: center;
@@ -43,14 +37,8 @@
             z-index: 10;
         }
 
-        h1 {
-            margin: 0;
-            font-size: 1.1rem;
-            letter-spacing: 1px;
-            color: var(--primary);
-        }
+        h1 { margin: 0; font-size: 1.1rem; color: var(--primary); }
 
-        /* 掃描主區域 */
         .scanner-container {
             position: relative;
             flex: 1;
@@ -60,17 +48,9 @@
             background: #000;
         }
 
-        #video {
-            display: none;
-        }
+        #video { display: none; }
+        #canvasOutput { width: 100%; height: 100%; object-fit: contain; }
 
-        #canvasOutput {
-            width: 100%;
-            height: 100%;
-            object-fit: contain; /* 保持原始比例 */
-        }
-
-        /* 狀態提示 */
         .overlay {
             position: absolute;
             bottom: 40px;
@@ -83,11 +63,11 @@
         }
 
         .status-badge {
-            background: rgba(0, 0, 0, 0.7);
-            padding: 8px 16px;
-            border-radius: 20px;
-            font-size: 0.9rem;
-            border: 1px solid rgba(255, 255, 255, 0.2);
+            background: rgba(0, 0, 0, 0.8);
+            padding: 10px 20px;
+            border-radius: 25px;
+            font-size: 0.95rem;
+            border: 2px solid rgba(255, 255, 255, 0.2);
             margin-bottom: 12px;
             transition: all 0.3s;
         }
@@ -95,15 +75,14 @@
         .status-badge.stable {
             border-color: var(--primary);
             color: var(--primary);
-            box-shadow: 0 0 15px rgba(16, 185, 129, 0.4);
+            box-shadow: 0 0 20px rgba(16, 185, 129, 0.5);
         }
 
-        /* 穩定進度條 */
         .progress-bar {
-            width: 200px;
-            height: 4px;
+            width: 220px;
+            height: 6px;
             background: rgba(255, 255, 255, 0.2);
-            border-radius: 2px;
+            border-radius: 3px;
             overflow: hidden;
             display: none;
         }
@@ -115,7 +94,6 @@
             transition: width 0.1s linear;
         }
 
-        /* 載入畫面 */
         #loadingScreen {
             position: fixed;
             inset: 0;
@@ -128,10 +106,9 @@
         }
 
         .spinner {
-            width: 40px;
-            height: 40px;
-            border: 4px solid rgba(16, 185, 129, 0.2);
-            border-top: 4px solid var(--primary);
+            width: 45px; height: 45px;
+            border: 5px solid rgba(16, 185, 129, 0.2);
+            border-top: 5px solid var(--primary);
             border-radius: 50%;
             animation: spin 1s linear infinite;
             margin-bottom: 15px;
@@ -139,7 +116,6 @@
 
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 
-        /* 結果顯示區域 */
         #resultView {
             position: fixed;
             inset: 0;
@@ -153,50 +129,34 @@
 
         .result-card {
             background: #1e293b;
-            padding: 10px;
+            padding: 12px;
             border-radius: 12px;
-            box-shadow: 0 10px 20px rgba(0,0,0,0.3);
             margin-top: 20px;
         }
 
-        #resultImg {
-            width: 100%;
-            height: auto;
-            border-radius: 8px;
-            display: block;
-        }
+        #resultImg { width: 100%; height: auto; border-radius: 8px; }
 
-        .action-btns {
-            display: flex;
-            gap: 15px;
-            margin-top: 25px;
-        }
+        .action-btns { display: flex; gap: 15px; margin-top: 25px; }
 
         button {
             flex: 1;
-            padding: 14px;
-            border-radius: 10px;
+            padding: 16px;
+            border-radius: 12px;
             border: none;
             font-size: 1rem;
             font-weight: 600;
             cursor: pointer;
-            transition: transform 0.1s;
         }
-
-        button:active { transform: scale(0.96); }
 
         .btn-save { background: var(--primary); color: white; }
         .btn-retry { background: #475569; color: white; }
-
-        /* 隱藏元素 */
-        #canvasBuffer { display: none; }
     </style>
 </head>
 <body>
 
     <div id="loadingScreen">
         <div class="spinner"></div>
-        <div>正在載入掃描引擎...</div>
+        <div>影像引擎初始化中...</div>
     </div>
 
     <div class="header">
@@ -208,7 +168,7 @@
         <canvas id="canvasOutput"></canvas>
         
         <div class="overlay">
-            <div id="statusBadge" class="status-badge">尋找名片中...</div>
+            <div id="statusBadge" class="status-badge">請將名片置於深色背景上...</div>
             <div id="progressContainer" class="progress-bar">
                 <div id="progressFill"></div>
             </div>
@@ -218,7 +178,7 @@
     <div id="resultView">
         <h2 style="text-align:center; font-size: 1.2rem;">掃描結果</h2>
         <div class="result-card">
-            <img id="resultImg" src="" alt="裁切後的名片">
+            <img id="resultImg" src="" alt="掃描結果">
         </div>
         <div class="action-btns">
             <button class="btn-retry" onclick="restartScan()">重新拍攝</button>
@@ -226,18 +186,16 @@
         </div>
     </div>
 
-    <canvas id="canvasBuffer"></canvas>
+    <canvas id="canvasBuffer" style="display:none;"></canvas>
 
     <script>
-        // 配置與全域變數
         let video, canvasOutput, ctxOutput, canvasBuffer, statusBadge, progressFill, progressContainer;
         let streaming = false;
         let stableCount = 0;
-        const STABLE_THRESHOLD = 25; // 連續 25 幀穩定則觸發拍照
+        const STABLE_THRESHOLD = 20; // 略微調快拍照速度
         let lastRect = null;
         let scanActive = true;
 
-        // 1. 初始化與 OpenCV 檢查
         function init() {
             video = document.getElementById('video');
             canvasOutput = document.getElementById('canvasOutput');
@@ -246,33 +204,23 @@
             statusBadge = document.getElementById('statusBadge');
             progressFill = document.getElementById('progressFill');
             progressContainer = document.getElementById('progressContainer');
-
             checkOpenCV();
         }
 
         function checkOpenCV() {
             if (typeof cv !== 'undefined' && cv.Mat) {
-                document.getElementById('loadingScreen').style.fadeOut = "0.5s";
-                setTimeout(() => {
-                    document.getElementById('loadingScreen').style.display = 'none';
-                    startCamera();
-                }, 500);
+                document.getElementById('loadingScreen').style.display = 'none';
+                startCamera();
             } else {
                 setTimeout(checkOpenCV, 200);
             }
         }
 
-        // 2. 相機啟動
         async function startCamera() {
             try {
-                const constraints = {
-                    video: {
-                        facingMode: "environment",
-                        width: { ideal: 1280 },
-                        height: { ideal: 720 }
-                    }
-                };
-                const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } }
+                });
                 video.srcObject = stream;
                 video.onloadedmetadata = () => {
                     video.play();
@@ -280,22 +228,18 @@
                     requestAnimationFrame(processLoop);
                 };
             } catch (err) {
-                alert("無法開啟相機，請確保已授權權限並使用 HTTPS 連線。");
-                console.error(err);
+                alert("無法存取相機，請檢查權限。");
             }
         }
 
-        // 3. 影像處理迴圈
         function processLoop() {
             if (!streaming || !scanActive) return;
 
-            // 同步尺寸
             if (canvasOutput.width !== video.videoWidth) {
                 canvasOutput.width = video.videoWidth;
                 canvasOutput.height = video.videoHeight;
             }
 
-            // 繪製原始影像
             ctxOutput.drawImage(video, 0, 0, canvasOutput.width, canvasOutput.height);
 
             let src = cv.imread(canvasOutput);
@@ -303,12 +247,12 @@
             let blurred = new cv.Mat();
             let edged = new cv.Mat();
 
-            // 預處理：灰階 -> 高斯模糊 -> 邊緣偵測
             cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-            cv.GaussianBlur(gray, blurred, new cv.Size(5, 5), 0);
-            cv.Canny(blurred, edged, 75, 200);
+            // 降低模糊程度，保留更多邊緣細節
+            cv.GaussianBlur(gray, blurred, new cv.Size(3, 3), 0);
+            // 放寬 Canny 閾值以捕捉較弱的邊緣 (50, 150)
+            cv.Canny(blurred, edged, 50, 150);
 
-            // 尋找輪廓
             let contours = new cv.MatVector();
             let hierarchy = new cv.Mat();
             cv.findContours(edged, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
@@ -320,13 +264,12 @@
                 let cnt = contours.get(i);
                 let area = cv.contourArea(cnt);
                 
-                // 篩選：面積需佔畫面的 10% 以上
-                if (area > (src.rows * src.cols * 0.1)) {
+                // 提高偵測靈敏度：佔畫面 8% 即可
+                if (area > (src.rows * src.cols * 0.08)) {
                     let peri = cv.arcLength(cnt, true);
                     let approx = new cv.Mat();
                     cv.approxPolyDP(cnt, approx, 0.02 * peri, true);
 
-                    // 四邊形判定
                     if (approx.rows === 4) {
                         if (area > maxArea) {
                             maxArea = area;
@@ -341,45 +284,43 @@
                 }
             }
 
-            // 4. 繪製線條與穩定判斷
             if (cardContour) {
+                // 繪製線條 (已加粗)
                 drawDetectionLine(cardContour);
                 
                 if (checkStability(cardContour)) {
                     stableCount++;
-                    statusBadge.innerText = "請保持靜止，正在自動拍攝...";
+                    statusBadge.innerText = "偵測成功！請保持不動...";
                     statusBadge.classList.add('stable');
                     progressContainer.style.display = 'block';
                     progressFill.style.width = (stableCount / STABLE_THRESHOLD * 100) + '%';
 
                     if (stableCount >= STABLE_THRESHOLD) {
                         handleCapture(src, cardContour);
-                        // 清理資源
                         cleanup([src, gray, blurred, edged, contours, hierarchy, cardContour]);
                         return;
                     }
                 } else {
                     stableCount = 0;
-                    statusBadge.innerText = "偵測到名片...";
+                    statusBadge.innerText = "對準名片中...";
                     statusBadge.classList.remove('stable');
                     progressFill.style.width = '0%';
                 }
             } else {
                 stableCount = 0;
-                statusBadge.innerText = "請對準名片邊緣...";
+                statusBadge.innerText = "請將名片置於深色背景上";
                 statusBadge.classList.remove('stable');
                 progressContainer.style.display = 'none';
             }
 
-            // 資源回收
             cleanup([src, gray, blurred, edged, contours, hierarchy, cardContour]);
             if (scanActive) requestAnimationFrame(processLoop);
         }
 
-        // 繪製綠色偵測框
+        // 修改此處：調整線條粗細
         function drawDetectionLine(contour) {
             ctxOutput.strokeStyle = "#10b981";
-            ctxOutput.lineWidth = 12;  // 從 6 增加到 10，讓線條更明顯
+            ctxOutput.lineWidth = 10; // 從 6 增加到 10，讓線條更明顯
             ctxOutput.lineJoin = "round";
             ctxOutput.beginPath();
             ctxOutput.moveTo(contour.data32S[0], contour.data32S[1]);
@@ -389,16 +330,15 @@
             ctxOutput.closePath();
             ctxOutput.stroke();
 
-            // 角落圓點
+            // 增加角落圓點大小
             ctxOutput.fillStyle = "#10b981";
             for (let i = 0; i < 4; i++) {
                 ctxOutput.beginPath();
-                ctxOutput.arc(contour.data32S[i * 2], contour.data32S[i * 2 + 1], 16, 0, Math.PI * 2);
+                ctxOutput.arc(contour.data32S[i * 2], contour.data32S[i * 2 + 1], 12, 0, Math.PI * 2); // 從 8 增加到 12
                 ctxOutput.fill();
             }
         }
 
-        // 穩定性檢查 (位移與面積)
         function checkStability(contour) {
             let moments = cv.moments(contour);
             let cx = moments.m10 / moments.m00;
@@ -412,18 +352,13 @@
 
             let dist = Math.hypot(cx - lastRect.cx, cy - lastRect.cy);
             let areaDiff = Math.abs(area - lastRect.area) / lastRect.area;
-            
             lastRect = { cx, cy, area };
 
-            // 判斷門檻：位移小於 5 像素且面積變動小於 2%
-            return dist < 5 && areaDiff < 0.02;
+            return dist < 8 && areaDiff < 0.03; // 稍微放寬穩定判定範圍
         }
 
-        // 5. 自動拍照與透視裁切
         function handleCapture(srcMat, contour) {
             scanActive = false;
-            
-            // 整理座標 (TL, TR, BR, BL)
             let pts = [];
             for (let i = 0; i < 4; i++) {
                 pts.push({ x: contour.data32S[i * 2], y: contour.data32S[i * 2 + 1] });
@@ -433,17 +368,11 @@
             let bot = pts.slice(2, 4).sort((a, b) => b.x - a.x);
             let sorted = [top[0], top[1], bot[0], bot[1]];
 
-            // 計算校正後的尺寸
-            let width = Math.max(
-                Math.hypot(sorted[1].x - sorted[0].x, sorted[1].y - sorted[0].y),
-                Math.hypot(sorted[2].x - sorted[3].x, sorted[2].y - sorted[3].y)
-            );
-            let height = Math.max(
-                Math.hypot(sorted[3].x - sorted[0].x, sorted[3].y - sorted[0].y),
-                Math.hypot(sorted[2].x - sorted[1].x, sorted[2].y - sorted[1].y)
-            );
+            let width = Math.max(Math.hypot(sorted[1].x - sorted[0].x, sorted[1].y - sorted[0].y),
+                                 Math.hypot(sorted[2].x - sorted[3].x, sorted[2].y - sorted[3].y));
+            let height = Math.max(Math.hypot(sorted[3].x - sorted[0].x, sorted[3].y - sorted[0].y),
+                                  Math.hypot(sorted[2].x - sorted[1].x, sorted[2].y - sorted[1].y));
 
-            // 透視變換
             let srcTri = cv.matFromArray(4, 1, cv.CV_32FC2, [
                 sorted[0].x, sorted[0].y, sorted[1].x, sorted[1].y,
                 sorted[2].x, sorted[2].y, sorted[3].x, sorted[3].y
@@ -454,20 +383,15 @@
             let result = new cv.Mat();
             cv.warpPerspective(srcMat, result, M, new cv.Size(width, height), cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar());
 
-            // 輸出裁切結果
             cv.imshow(canvasBuffer, result);
             document.getElementById('resultImg').src = canvasBuffer.toDataURL('image/png');
             document.getElementById('resultView').style.display = 'flex';
 
-            // 釋放局部 Mat
             srcTri.delete(); dstTri.delete(); M.delete(); result.delete();
         }
 
-        // 輔助工具
         function cleanup(mats) {
-            mats.forEach(m => {
-                if (m && !m.isDeleted()) m.delete();
-            });
+            mats.forEach(m => { if (m && !m.isDeleted()) m.delete(); });
         }
 
         function restartScan() {
@@ -480,7 +404,7 @@
 
         function downloadResult() {
             const link = document.createElement('a');
-            link.download = `BusinessCard_${Date.now()}.png`;
+            link.download = `Card_${Date.now()}.png`;
             link.href = document.getElementById('resultImg').src;
             link.click();
         }
@@ -489,4 +413,3 @@
     </script>
 </body>
 </html>
-
