@@ -32,13 +32,13 @@
     </style>
 </head>
 <body>
-    <div id="loadingScreen"><div class="spinner"></div><div>正在優化影像演算法...</div></div>
-    <div class="header"><h1>智能名片掃描 (反光與圓角加強版)</h1></div>
+    <div id="loadingScreen"><div class="spinner"></div><div>啟動影像引擎中...</div></div>
+    <div class="header"><h1>智能名片掃描 (反光與圓角修復版)</h1></div>
     <div class="scanner-container">
         <video id="video" playsinline></video>
         <canvas id="canvasOutput"></canvas>
         <div class="overlay">
-            <div id="statusBadge" class="status-badge">將名片移入鏡頭...</div>
+            <div id="statusBadge" class="status-badge">等待相機啟動...</div>
             <div id="progressContainer" class="progress-bar"><div id="progressFill"></div></div>
         </div>
     </div>
@@ -54,7 +54,7 @@
     <script>
         let video, canvasOutput, ctxOutput, canvasBuffer, statusBadge, progressFill, progressContainer;
         let streaming = false, stableCount = 0, lastRect = null, scanActive = true;
-        const STABLE_REQ = 18; // 稍微提高採樣頻率
+        const STABLE_REQ = 15; // 調低一點點要求以增加流暢度
 
         function init() {
             video = document.getElementById('video');
@@ -80,100 +80,109 @@
                     video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } }
                 });
                 video.srcObject = stream;
-                video.onloadedmetadata = () => { video.play(); streaming = true; requestAnimationFrame(processLoop); };
-            } catch (err) { alert("相機啟動失敗。"); }
+                video.onloadedmetadata = () => {
+                    video.play();
+                    streaming = true;
+                    statusBadge.innerText = "將名片移入鏡頭...";
+                    requestAnimationFrame(processLoop);
+                };
+            } catch (err) { 
+                statusBadge.innerText = "相機啟動失敗";
+                alert("無法存取相機，請確認已授予權限。"); 
+            }
         }
 
         function processLoop() {
             if (!streaming || !scanActive) return;
-            if (canvasOutput.width !== video.videoWidth) {
-                canvasOutput.width = video.videoWidth;
-                canvasOutput.height = video.videoHeight;
-            }
-            ctxOutput.drawImage(video, 0, 0, canvasOutput.width, canvasOutput.height);
 
-            let src = cv.imread(canvasOutput);
-            let gray = new cv.Mat(), binary = new cv.Mat(), morphed = new cv.Mat();
-            
-            // 1. 影像增強：灰階化
-            cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-            
-            // 2. 改進點：使用自適應二值化處理反光
-            cv.adaptiveThreshold(gray, binary, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY_INV, 11, 2);
-            
-            // 3. 改進點：形態學運算 (閉合運算) 填補圓角處的微小斷裂
-            let M_kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(5, 5));
-            cv.morphologyEx(binary, morphed, cv.MORPH_CLOSE, M_kernel);
+            try {
+                if (canvasOutput.width !== video.videoWidth) {
+                    canvasOutput.width = video.videoWidth;
+                    canvasOutput.height = video.videoHeight;
+                }
+                ctxOutput.drawImage(video, 0, 0, canvasOutput.width, canvasOutput.height);
 
-            let contours = new cv.MatVector(), hierarchy = new cv.Mat();
-            cv.findContours(morphed, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
-
-            let bestCard = null, maxArea = 0;
-            const viewArea = src.rows * src.cols;
-
-            for (let i = 0; i < contours.size(); ++i) {
-                let cnt = contours.get(i);
-                let area = cv.contourArea(cnt);
-                if (area < viewArea * 0.1 || area > viewArea * 0.95) continue;
-
-                // 使用 Convex Hull 穩定形狀
-                let hull = new cv.Mat();
-                cv.convexHull(cnt, hull, false, true);
+                let src = cv.imread(canvasOutput);
+                let gray = new cv.Mat(), binary = new cv.Mat(), morphed = new cv.Mat();
                 
-                let peri = cv.arcLength(hull, true);
-                let approx = new cv.Mat();
-                cv.approxPolyDP(hull, approx, 0.02 * peri, true);
+                // 1. 灰階處理
+                cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+                
+                // 2. 輕量化邊緣增強：先高斯模糊減少雜訊
+                cv.GaussianBlur(gray, gray, new cv.Size(5, 5), 0);
+                
+                // 3. 使用較簡單的 Canny 配合 Dilate，降低 adaptiveThreshold 的運算負擔
+                cv.Canny(gray, binary, 75, 200);
+                let M_kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(3, 3));
+                cv.dilate(binary, morphed, M_kernel); // 膨脹線條以連結斷點
 
-                // 容許 4~8 邊形（為了相容極圓的圓角）
-                if (approx.rows >= 4 && approx.rows <= 8) {
-                    let rect = cv.boundingRect(approx);
-                    let solidity = area / (rect.width * rect.height);
+                let contours = new cv.MatVector(), hierarchy = new cv.Mat();
+                cv.findContours(morphed, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+
+                let bestCard = null, maxArea = 0;
+                const viewArea = src.rows * src.cols;
+
+                for (let i = 0; i < contours.size(); ++i) {
+                    let cnt = contours.get(i);
+                    let area = cv.contourArea(cnt);
                     
-                    // 檢查矩形程度 (Solidity)
-                    if (solidity > 0.65 && area > maxArea) {
-                        maxArea = area;
-                        if (bestCard) bestCard.delete();
-                        bestCard = simplifyToFourPoints(approx);
-                    } else { approx.delete(); }
-                } else { approx.delete(); }
-                hull.delete();
-            }
+                    if (area > viewArea * 0.1 && area < viewArea * 0.95) {
+                        let hull = new cv.Mat();
+                        cv.convexHull(cnt, hull, false, true);
+                        
+                        let peri = cv.arcLength(hull, true);
+                        let approx = new cv.Mat();
+                        cv.approxPolyDP(hull, approx, 0.02 * peri, true);
 
-            if (bestCard) {
-                renderOverlay(bestCard);
-                if (validateStability(bestCard)) {
-                    stableCount++;
-                    statusBadge.innerText = "對準成功，請保持靜止...";
-                    statusBadge.classList.add('stable');
-                    progressContainer.style.display = 'block';
-                    progressFill.style.width = (stableCount / STABLE_REQ * 100) + '%';
-                    if (stableCount >= STABLE_REQ) {
-                        captureCard(src, bestCard);
-                        cleanup([src, gray, binary, morphed, contours, hierarchy, bestCard, M_kernel]);
-                        return;
+                        // 判斷是否為合理的矩形區域 (4-8邊形)
+                        if (approx.rows >= 4 && approx.rows <= 8) {
+                            if (area > maxArea) {
+                                maxArea = area;
+                                if (bestCard) bestCard.delete();
+                                bestCard = simplifyToFourPoints(approx);
+                            } else { approx.delete(); }
+                        } else { approx.delete(); }
+                        hull.delete();
+                    }
+                }
+
+                if (bestCard) {
+                    renderOverlay(bestCard);
+                    if (validateStability(bestCard)) {
+                        stableCount++;
+                        statusBadge.innerText = "鎖定成功，請保持不動...";
+                        statusBadge.classList.add('stable');
+                        progressContainer.style.display = 'block';
+                        progressFill.style.width = (stableCount / STABLE_REQ * 100) + '%';
+                        if (stableCount >= STABLE_REQ) {
+                            captureCard(src, bestCard);
+                            cleanup([src, gray, binary, morphed, contours, hierarchy, bestCard, M_kernel]);
+                            return; // 拍照後終止迴圈
+                        }
+                    } else {
+                        stableCount = 0;
+                        statusBadge.innerText = "找到名片，穩定中...";
+                        statusBadge.classList.remove('stable');
                     }
                 } else {
                     stableCount = 0;
-                    statusBadge.innerText = "找到名片，穩定中...";
-                    statusBadge.classList.remove('stable');
+                    statusBadge.innerText = "尋找邊緣中 (請對準名片)";
+                    progressContainer.style.display = 'none';
                 }
-            } else {
-                stableCount = 0;
-                statusBadge.innerText = "正在尋找邊緣 (請避開強烈反光)";
-                progressContainer.style.display = 'none';
+
+                cleanup([src, gray, binary, morphed, contours, hierarchy, bestCard, M_kernel]);
+            } catch (e) {
+                console.error("Frame processing error:", e);
             }
 
-            cleanup([src, gray, binary, morphed, contours, hierarchy, bestCard, M_kernel]);
             if (scanActive) requestAnimationFrame(processLoop);
         }
 
-        // 強制將偵測到的形狀映射到最外圍的四個角落
         function simplifyToFourPoints(approx) {
             let pts = [];
             for (let i = 0; i < approx.rows; i++) {
                 pts.push({ x: approx.data32S[i*2], y: approx.data32S[i*2+1] });
             }
-            // 排序演算法：找和最小(TL)、和最大(BR)、差最小(TR)、差最大(BL)
             let sums = pts.map(p => p.x + p.y);
             let diffs = pts.map(p => p.y - p.x);
             
@@ -189,7 +198,7 @@
 
         function renderOverlay(cnt) {
             ctxOutput.strokeStyle = "#10b981";
-            ctxOutput.lineWidth = 15; // 視覺強化
+            ctxOutput.lineWidth = 12;
             ctxOutput.lineJoin = "round";
             ctxOutput.beginPath();
             ctxOutput.moveTo(cnt.data32S[0], cnt.data32S[1]);
@@ -197,22 +206,22 @@
             ctxOutput.closePath();
             ctxOutput.stroke();
             
-            // 繪製角落大型提示點
             ctxOutput.fillStyle = "#10b981";
             for (let i = 0; i < 4; i++) {
                 ctxOutput.beginPath();
-                ctxOutput.arc(cnt.data32S[i*2], cnt.data32S[i*2+1], 18, 0, Math.PI*2);
+                ctxOutput.arc(cnt.data32S[i*2], cnt.data32S[i*2+1], 15, 0, Math.PI*2);
                 ctxOutput.fill();
             }
         }
 
         function validateStability(cnt) {
             let m = cv.moments(cnt);
+            if (m.m00 === 0) return false;
             let cx = m.m10/m.m00, cy = m.m01/m.m00;
             if (!lastRect) { lastRect = {cx, cy}; return false; }
             let d = Math.hypot(cx - lastRect.cx, cy - lastRect.cy);
             lastRect = {cx, cy};
-            return d < 6; // 嚴格的穩定度檢查
+            return d < 8; 
         }
 
         function captureCard(src, cnt) {
@@ -221,7 +230,6 @@
                 {x: cnt.data32S[0], y: cnt.data32S[1]}, {x: cnt.data32S[2], y: cnt.data32S[3]},
                 {x: cnt.data32S[4], y: cnt.data32S[5]}, {x: cnt.data32S[6], y: cnt.data32S[7]}
             ];
-            // 計算裁切尺寸
             let w = Math.max(Math.hypot(p[1].x-p[0].x, p[1].y-p[0].y), Math.hypot(p[2].x-p[3].x, p[2].y-p[3].y));
             let h = Math.max(Math.hypot(p[3].x-p[0].x, p[3].y-p[0].y), Math.hypot(p[2].x-p[1].x, p[2].y-p[1].y));
             
@@ -238,7 +246,15 @@
         }
 
         function cleanup(mats) { mats.forEach(m => { if(m && !m.isDeleted()) m.delete(); }); }
-        function restartScan() { document.getElementById('resultView').style.display='none'; scanActive=true; stableCount=0; lastRect=null; requestAnimationFrame(processLoop); }
+        
+        function restartScan() { 
+            document.getElementById('resultView').style.display='none'; 
+            scanActive=true; 
+            stableCount=0; 
+            lastRect=null; 
+            requestAnimationFrame(processLoop); 
+        }
+
         function downloadResult() { 
             const a = document.createElement('a'); 
             a.download=`Card_Scan_${Date.now()}.png`; 
